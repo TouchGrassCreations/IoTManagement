@@ -18,11 +18,20 @@ export async function handleIdentifyRequest(request: Request, deps: Dependencies
     const bytes = new Uint8Array(await image.arrayBuffer());
     if (!hasSignature(bytes, image.type)) return Response.json({ error: "The selected file is not a valid image." }, { status: 400 });
     const detections = await deps.recognize({ bytes, mimeType: image.type });
-    return Response.json({ detections, token: await deps.issueToken() });
+    const token = await deps.issueToken();
+    return Response.json({ detections, token });
   } catch (error) {
+    console.error("Identification failed", error);
     if (error instanceof Error && /not configured/.test(error.message)) return Response.json({ error: error.message }, { status: 500 });
     return Response.json({ error: "Identification is temporarily unavailable. Please retry." }, { status: 502 });
   }
 }
 
-export function POST(request: Request) { return handleIdentifyRequest(request, { recognize: recognizeComponents, issueToken: issueConfirmationToken }); }
+export async function POST(request: Request) {
+  const { env } = await import("cloudflare:workers");
+  const bindings = env as unknown as Record<string, string>;
+  return handleIdentifyRequest(request, {
+    recognize: (input) => recognizeComponents({ ...input, apiKey: bindings.GEMINI_API_KEY, model: bindings.GEMINI_MODEL }),
+    issueToken: () => issueConfirmationToken(bindings.CONFIRMATION_TOKEN_SECRET),
+  });
+}

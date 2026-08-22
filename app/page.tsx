@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import IdentificationWorkspace from "./components/IdentificationWorkspace";
+import { INVENTORY_CATEGORIES } from "../lib/identification/validation.ts";
 import type { InventoryResult } from "../lib/identification/types";
 
 type Part = {
@@ -18,15 +19,15 @@ type Part = {
 };
 
 const starterParts: Part[] = [
-  { id: 1, name: "Arduino Uno R3", category: "Boards", quantity: 3, location: "Bin A1", code: "ARD-UNO", tone: "blue", symbol: "UNO", description: "ATmega328P development board for rapid prototyping.", tags: ["5V", "Digital", "Analog"] },
-  { id: 2, name: "ESP32 DevKit V1", category: "Boards", quantity: 2, location: "Bin A2", code: "ESP-32", tone: "navy", symbol: "32", description: "Wi-Fi and Bluetooth enabled microcontroller board.", tags: ["Wi-Fi", "Bluetooth", "3.3V"] },
+  { id: 1, name: "Arduino Uno R3", category: "Microcontrollers & Compute", quantity: 3, location: "Bin A1", code: "ARD-UNO", tone: "blue", symbol: "UNO", description: "ATmega328P development board for rapid prototyping.", tags: ["5V", "Digital", "Analog"] },
+  { id: 2, name: "ESP32 DevKit V1", category: "Microcontrollers & Compute", quantity: 2, location: "Bin A2", code: "ESP-32", tone: "navy", symbol: "32", description: "Wi-Fi and Bluetooth enabled microcontroller board.", tags: ["Wi-Fi", "Bluetooth", "3.3V"] },
   { id: 3, name: "DHT22", category: "Sensors", quantity: 4, location: "Bin B1", code: "SNS-DHT22", tone: "white", symbol: "°%", description: "Digital temperature and humidity sensor.", tags: ["Temperature", "Humidity", "Digital"] },
   { id: 4, name: "HC-SR04", category: "Sensors", quantity: 6, location: "Bin B2", code: "SNS-US04", tone: "teal", symbol: ")))", description: "Ultrasonic distance sensor with a 2–400 cm range.", tags: ["Distance", "5V", "Digital"] },
   { id: 5, name: "PIR Motion Sensor", category: "Sensors", quantity: 2, location: "Bin B3", code: "SNS-PIR", tone: "mint", symbol: "PIR", description: "Passive infrared sensor for detecting human motion.", tags: ["Motion", "Digital", "5V"] },
-  { id: 6, name: "L298N Motor Driver", category: "Drivers", quantity: 2, location: "Bin C1", code: "DRV-L298", tone: "red", symbol: "M↔", description: "Dual H-bridge driver for DC motors and steppers.", tags: ["Motor", "12V", "Dual channel"] },
-  { id: 7, name: "SG90 Micro Servo", category: "Actuators", quantity: 8, location: "Bin C2", code: "ACT-SG90", tone: "sky", symbol: "90°", description: "Compact 180° positional servo for lightweight mechanisms.", tags: ["Servo", "PWM", "5V"] },
+  { id: 6, name: "L298N Motor Driver", category: "Motor Drivers & Power Drivers", quantity: 2, location: "Bin C1", code: "DRV-L298", tone: "red", symbol: "M↔", description: "Dual H-bridge driver for DC motors and steppers.", tags: ["Motor", "12V", "Dual channel"] },
+  { id: 7, name: "SG90 Micro Servo", category: "Motors & Actuators", quantity: 8, location: "Bin C2", code: "ACT-SG90", tone: "sky", symbol: "90°", description: "Compact 180° positional servo for lightweight mechanisms.", tags: ["Servo", "PWM", "5V"] },
   { id: 8, name: "Soil Moisture Probe", category: "Sensors", quantity: 5, location: "Bin B4", code: "SNS-SOIL", tone: "green", symbol: "H₂O", description: "Analog probe for estimating soil moisture levels.", tags: ["Soil", "Analog", "Farm"] },
-  { id: 9, name: "Mini Breadboard", category: "Prototyping", quantity: 7, location: "Bin D1", code: "PRT-BRD", tone: "cream", symbol: "•••", description: "170-point solderless board for compact circuits.", tags: ["Prototype", "Reusable"] },
+  { id: 9, name: "Mini Breadboard", category: "Prototyping & PCB", quantity: 7, location: "Bin D1", code: "PRT-BRD", tone: "cream", symbol: "•••", description: "170-point solderless board for compact circuits.", tags: ["Prototype", "Reusable"] },
 ];
 
 const projects = [
@@ -47,7 +48,7 @@ export default function Home() {
   const [isAdding, setIsAdding] = useState(false);
   const [isIdentifying, setIsIdentifying] = useState(false);
 
-  const categories = ["All parts", "Boards", "Sensors", "Drivers", "Actuators", "Prototyping"];
+  const categories = ["All parts", ...INVENTORY_CATEGORIES];
   const filtered = useMemo(() => parts.filter((part) => {
     const matchesCategory = category === "All parts" || part.category === category;
     const haystack = `${part.name} ${part.code} ${part.category} ${part.tags.join(" ")}`.toLowerCase();

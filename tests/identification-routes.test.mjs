@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { handleIdentifyRequest } from "../app/api/identify/route.ts";
 import { handleConfirmRequest } from "../app/api/identify/confirm/route.ts";
+import { recognizeComponents } from "../lib/identification/gemini.ts";
 
 const sample = { name: "HC-SR04 ultrasonic sensor", model: "HC-SR04", category: "Sensors", quantity: 1, boundingBox: { top: .1, left: .1, width: .3, height: .2 }, confidence: .93, visibleMarkings: ["HC-SR04"], alternatives: [], description: "Ultrasonic distance sensor", tags: ["distance", "5V"] };
 
@@ -28,6 +29,90 @@ test("maps provider failures without returning a token", async () => {
   const response = await handleIdentifyRequest(imageRequest(), { recognize: async () => { throw new Error("Gemini quota exceeded"); }, issueToken: async () => { throw new Error("must not run"); } });
   assert.equal(response.status, 502);
   assert.deepEqual(await response.json(), { error: "Identification is temporarily unavailable. Please retry." });
+});
+
+test("uses JSON mode without an over-complex provider schema", async () => {
+  const previousKey = process.env.GEMINI_API_KEY;
+  process.env.GEMINI_API_KEY = "test-key";
+  let requestBody;
+  let requestInit;
+  try {
+    const result = await recognizeComponents({
+      bytes: new Uint8Array([1]),
+      mimeType: "image/png",
+      fetchImpl: async (_url, init) => {
+        requestInit = init;
+        requestBody = JSON.parse(String(init?.body));
+        return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({ detections: [{ ...sample, boundingBox: { top: 100, left: 200, width: 300, height: 400 } }] }) }] } }] }), { status: 200 });
+      },
+    });
+    assert.deepEqual(result[0].boundingBox, { top: .1, left: .2, width: .3, height: .4 });
+  } finally {
+    if (previousKey === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = previousKey;
+  }
+
+  assert.equal(requestBody.generationConfig.responseMimeType, "application/json");
+  assert.equal(requestInit.cache, "no-store");
+  assert.equal(requestBody.generationConfig.responseJsonSchema, undefined);
+  assert.match(requestBody.contents[0].parts[0].text, /boundingBox/);
+  assert.match(requestBody.contents[0].parts[0].text, /alternatives/);
+  assert.match(requestBody.contents[0].parts[0].text, /ESP32-CAM/i);
+  assert.match(requestBody.contents[0].parts[0].text, /one component/i);
+  assert.match(requestBody.contents[0].parts[0].text, /quantity.*actual count/i);
+  assert.match(requestBody.contents[0].parts[0].text, /Microcontrollers & Compute/);
+  assert.match(requestBody.contents[0].parts[0].text, /Storage \/ Spare Parts/);
+  assert.match(requestBody.contents[0].parts[0].text, /Others/);
+  assert.match(requestBody.contents[0].parts[0].text, /edge|corner/i);
+  assert.match(requestBody.contents[0].parts[0].text, /partially visible|cropped/i);
+  assert.match(requestBody.contents[0].parts[0].text, /mecanum wheel/i);
+  assert.match(requestBody.contents[0].parts[0].text, /aluminum.*chassis/i);
+  assert.match(requestBody.contents[0].parts[0].text, /do not infer.*hidden/i);
+});
+
+test("clamps Gemini bounding boxes that extend beyond the image", async () => {
+  const previousKey = process.env.GEMINI_API_KEY;
+  process.env.GEMINI_API_KEY = "test-key";
+  try {
+    const result = await recognizeComponents({
+      bytes: new Uint8Array([1]), mimeType: "image/png",
+      fetchImpl: async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({ detections: [{ ...sample, boundingBox: { top: 800, left: 700, width: 400, height: 300 } }] }) }] } }] }), { status: 200 }),
+    });
+    assert.deepEqual(result[0].boundingBox, { top: .8, left: .7, width: .3, height: .2 });
+  } finally {
+    if (previousKey === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = previousKey;
+  }
+});
+
+test("does not rescale an already-normalized overflowing box", async () => {
+  const previousKey = process.env.GEMINI_API_KEY;
+  process.env.GEMINI_API_KEY = "test-key";
+  try {
+    const result = await recognizeComponents({
+      bytes: new Uint8Array([1]), mimeType: "image/png",
+      fetchImpl: async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({ detections: [{ ...sample, boundingBox: { top: .2, left: .2, width: 1.1, height: .4 } }] }) }] } }] }), { status: 200 }),
+    });
+    assert.deepEqual(result[0].boundingBox, { top: .2, left: .2, width: .8, height: .4 });
+  } finally {
+    if (previousKey === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = previousKey;
+  }
+});
+
+test("normalizes a tiny integer 0-1000 box near an image edge", async () => {
+  const previousKey = process.env.GEMINI_API_KEY;
+  process.env.GEMINI_API_KEY = "test-key";
+  try {
+    const result = await recognizeComponents({
+      bytes: new Uint8Array([1]), mimeType: "image/png",
+      fetchImpl: async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({ detections: [{ ...sample, boundingBox: { top: 2, left: 3, width: 4, height: 5 } }] }) }] } }] }), { status: 200 }),
+    });
+    assert.deepEqual(result[0].boundingBox, { top: .002, left: .003, width: .004, height: .005 });
+  } finally {
+    if (previousKey === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = previousKey;
+  }
 });
 
 test("confirmation persists only accepted reviewed rows", async () => {
