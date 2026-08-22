@@ -15,6 +15,13 @@
       "when": 1787407200000,
       "tag": "0001_inventory_category_taxonomy",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1787410800000,
+      "tag": "0002_inventory_deletion",
+      "breakpoints": true
     }
   ]
 }
