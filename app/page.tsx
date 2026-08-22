@@ -1,9 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import IdentificationWorkspace from "./components/IdentificationWorkspace";
+import type { InventoryResult } from "../lib/identification/types";
 
 type Part = {
-  id: number;
+  id: number | string;
   name: string;
   category: string;
   quantity: number;
@@ -43,6 +45,7 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("All parts");
   const [isAdding, setIsAdding] = useState(false);
+  const [isIdentifying, setIsIdentifying] = useState(false);
 
   const categories = ["All parts", "Boards", "Sensors", "Drivers", "Actuators", "Prototyping"];
   const filtered = useMemo(() => parts.filter((part) => {
@@ -62,6 +65,18 @@ export default function Home() {
     };
     setParts((current) => [newPart, ...current]);
     setIsAdding(false);
+  }
+
+  function applyIdentified(identified: InventoryResult[]) {
+    setParts((current) => {
+      const next = [...current];
+      for (const item of identified) {
+        const index = next.findIndex((part) => part.name.toLowerCase() === item.name.toLowerCase());
+        const converted: Part = { id: item.id, name: item.name, category: item.category, quantity: item.quantity, location: "Unsorted", code: item.model || "MODEL-UNKNOWN", tone: "purple", symbol: item.name.slice(0, 3).toUpperCase(), description: item.description, tags: item.tags };
+        if (index >= 0) next[index] = { ...next[index], ...converted }; else next.unshift(converted);
+      }
+      return next;
+    });
   }
 
   return (
@@ -111,7 +126,7 @@ export default function Home() {
                 <span className="identify-icon">?</span>
                 <h3>Mystery part?</h3>
                 <p>Snap a clear photo and save it for identification.</p>
-                <button onClick={() => setIsAdding(true)}>Identify a part →</button>
+                <button onClick={() => setIsIdentifying(true)}>Identify a part →</button>
               </div>
             </aside>
 
@@ -163,13 +178,13 @@ export default function Home() {
         </section>
       )}
 
-      {isAdding && <div className="modal-backdrop" role="presentation" onMouseDown={() => setIsAdding(false)}>
-        <div className="modal" role="dialog" aria-modal="true" aria-labelledby="add-title" onMouseDown={(e) => e.stopPropagation()}>
+      {isAdding && <div className="modal-backdrop">
+        <div className="modal" role="dialog" aria-modal="true" aria-labelledby="add-title">
           <button className="close" onClick={() => setIsAdding(false)} aria-label="Close">×</button>
           <p className="eyebrow">CATALOG A PART</p><h2 id="add-title">What did you find?</h2>
           <p>Add what you know now—you can fill in technical details later.</p>
           <form action={addPart}>
-            <label>Component name<input name="name" placeholder="e.g. BMP280 pressure sensor" required autoFocus /></label>
+            <label>Component name<input name="name" placeholder="e.g. BMP280 pressure sensor" required /></label>
             <div className="form-row">
               <label>Category<select name="category" defaultValue="Sensors">{categories.slice(1).map((c) => <option key={c}>{c}</option>)}</select></label>
               <label>Quantity<input name="quantity" type="number" min="1" defaultValue="1" /></label>
@@ -179,6 +194,7 @@ export default function Home() {
           </form>
         </div>
       </div>}
+      {isIdentifying && <IdentificationWorkspace onClose={() => setIsIdentifying(false)} onConfirmed={applyIdentified} />}
     </main>
   );
 }
