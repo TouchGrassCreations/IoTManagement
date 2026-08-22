@@ -16,6 +16,13 @@ export type RemoveInventoryInput = {
   expectedCurrentQuantity: number;
 };
 
+export type CreateInventoryInput = {
+  name: string;
+  category: string;
+  quantity: number;
+  location: string;
+};
+
 export type RemoveInventoryResult =
   | { deleted: true; id: string }
   | { deleted: false; item: InventoryItem };

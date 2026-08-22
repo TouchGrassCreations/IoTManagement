@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { handleInventoryList } from "../app/api/inventory/route.ts";
+import { handleInventoryCreate, handleInventoryList } from "../app/api/inventory/route.ts";
 import { handleInventoryRemoval } from "../app/api/inventory/[id]/remove/route.ts";
 import { InventoryNotFoundError, InventoryQuantityConflictError } from "../lib/inventory/persistence.ts";
 
@@ -11,6 +11,14 @@ test("GET returns current inventory", async () => {
   const response = await handleInventoryList({ list: async () => [item] });
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { inventory: [item] });
+});
+
+test("POST validates and persists manual inventory", async () => {
+  let received;
+  const response = await handleInventoryCreate(new Request("http://test/api/inventory", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "PIR Motion Sensor", category: "Sensors", quantity: 2, location: "Bin B3" }) }), { create: async (input) => { received = input; return item; } });
+  assert.equal(response.status, 201);
+  assert.equal(received.quantity, 2);
+  assert.deepEqual(await response.json(), { item });
 });
 
 test("remove maps stale stock to 409 with current inventory", async () => {

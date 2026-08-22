@@ -45,6 +45,20 @@ test("full removal deletes both audit types before the part", async () => {
 test("stale quantity throws a typed conflict containing current inventory", async () => {
   const db = database({ ...part, quantity: 4 });
   await assert.rejects(
+    removeInventoryQuantity({ id: "part-1", quantity: 5, expectedCurrentQuantity: 5 }, db),
+    (error) => error instanceof InventoryQuantityConflictError && error.item.quantity === 4,
+  );
+});
+
+test("conditional mutation race returns latest stock instead of false success", async () => {
+  let reads = 0;
+  const db = {
+    prepare(statement) {
+      return { bind() { return { statement, first: async () => (++reads === 1 ? part : { ...part, quantity: 4 }), all: async () => ({ results: [] }) }; } };
+    },
+    async batch() { return [{ meta: { changes: 0 } }, { meta: { changes: 0 } }]; },
+  };
+  await assert.rejects(
     removeInventoryQuantity({ id: "part-1", quantity: 2, expectedCurrentQuantity: 5 }, db),
     (error) => error instanceof InventoryQuantityConflictError && error.item.quantity === 4,
   );

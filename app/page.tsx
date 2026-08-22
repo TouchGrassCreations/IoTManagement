@@ -68,16 +68,16 @@ export default function Home() {
   }), [parts, query, category]);
   const unitCount = parts.reduce((sum, part) => sum + part.quantity, 0);
 
-  function addPart(formData: FormData) {
+  async function addPart(formData: FormData) {
     const name = String(formData.get("name") || "Unnamed component");
-    const newPart: Part = {
-      id: crypto.randomUUID(), name, model: null, category: String(formData.get("category") || "Sensors"),
-      quantity: Number(formData.get("quantity")) || 1, location: String(formData.get("location") || "Unsorted"),
-      code: `NEW-${parts.length + 1}`, tone: "purple", symbol: name.slice(0, 3).toUpperCase(),
-      description: "Newly catalogued component. Add notes after identification.", tags: ["New", "Needs review"],
-    };
-    setParts((current) => [newPart, ...current]);
-    setIsAdding(false);
+    try {
+      const response = await fetch("/api/inventory", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, category: String(formData.get("category") || "Sensors"), quantity: Number(formData.get("quantity")) || 1, location: String(formData.get("location") || "Unsorted") }) });
+      const payload = await response.json() as { item?: InventoryItem; error?: string };
+      if (!response.ok || !payload.item) throw new Error(payload.error || "The component could not be added.");
+      setParts((current) => [presentPart(payload.item!), ...current.filter((part) => part.id !== payload.item!.id)]);
+      setInventoryError("");
+      setIsAdding(false);
+    } catch (error) { setInventoryError(error instanceof Error ? error.message : "The component could not be added."); }
   }
 
   function applyIdentified(identified: InventoryResult[]) {

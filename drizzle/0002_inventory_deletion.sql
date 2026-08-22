@@ -1,5 +1,7 @@
 ALTER TABLE inventory_parts ADD COLUMN location TEXT NOT NULL DEFAULT 'Unsorted';
+--> statement-breakpoint
 ALTER TABLE inventory_parts ADD COLUMN code TEXT NOT NULL DEFAULT 'MODEL-UNKNOWN';
+--> statement-breakpoint
 
 CREATE TABLE inventory_adjustment_events (
   id TEXT PRIMARY KEY NOT NULL,
@@ -10,7 +12,9 @@ CREATE TABLE inventory_adjustment_events (
   quantity_after INTEGER NOT NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+--> statement-breakpoint
 CREATE INDEX idx_inventory_adjustment_events_part_id ON inventory_adjustment_events(inventory_part_id);
+--> statement-breakpoint
 
 INSERT OR IGNORE INTO inventory_parts (id,name,normalized_name,model,model_key,category,quantity,location,code,description,tags) VALUES
 ('seed-arduino-uno-r3','Arduino Uno R3','arduino uno r3',NULL,'__unknown__','Microcontrollers & Compute',3,'Bin A1','ARD-UNO','ATmega328P development board for rapid prototyping.','["5V","Digital","Analog"]'),
