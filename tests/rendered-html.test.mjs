@@ -35,6 +35,17 @@ test("renders the persistent inventory and removal contracts", async () => {
   assert.match(dialogSource, /permanently deletes all/);
 });
 
+test("supports concurrent pending removals per component", async () => {
+  const pageSource = await import("node:fs/promises").then((fs) => fs.readFile(new URL("../app/page.tsx", import.meta.url), "utf8"));
+  assert.match(pageSource, /pendingRemovals/);
+  assert.match(pageSource, /pending\.item\.id === part\.id/);
+  assert.match(pageSource, /undoRemoval\(pending\.item\.id\)/);
+  assert.match(pageSource, /removal-toast-stack/);
+  assert.match(pageSource, /error\.item = payload\.item/);
+  assert.match(pageSource, /inventoryResponseGuard\.current\.recordMutation\(\)/);
+  assert.match(pageSource, /function applyIdentified[\s\S]*recordMutation\(\)[\s\S]*loadInventory\(\)/);
+});
+
 test("does not render the disposable starter preview", async () => {
   const html = await (await render()).text();
   assert.doesNotMatch(html, /Your site is taking shape|Building your site/);

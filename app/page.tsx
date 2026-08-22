@@ -6,6 +6,8 @@ import PendingRemovalToast from "./components/PendingRemovalToast";
 import RemoveInventoryDialog from "./components/RemoveInventoryDialog";
 import { INVENTORY_CATEGORIES } from "../lib/identification/validation.ts";
 import { createPendingRemoval } from "../lib/inventory/pending-removal.ts";
+import { projectInventoryWithPending } from "../lib/inventory/optimistic-inventory.ts";
+import { createInventoryResponseGuard } from "../lib/inventory/response-guard.ts";
 import type { InventoryItem, RemoveInventoryResult } from "../lib/inventory/types.ts";
 import type { InventoryResult } from "../lib/identification/types";
 
@@ -13,6 +15,9 @@ type Part = InventoryItem & {
   tone: string;
   symbol: string;
 };
+
+type PendingRemoval = { item: Part; quantity: number; deadline: number };
+type RemovalRequestError = Error & { status?: number; item?: InventoryItem };
 
 function presentPart(item: InventoryItem): Part {
   return { ...item, tone: "purple", symbol: item.name.slice(0, 3).toUpperCase() };
@@ -38,16 +43,22 @@ export default function Home() {
   const [inventoryError, setInventoryError] = useState("");
   const [inventoryLoading, setInventoryLoading] = useState(true);
   const [removeItem, setRemoveItem] = useState<Part | null>(null);
-  const [pendingRemoval, setPendingRemoval] = useState<{ item: Part; quantity: number; deadline: number } | null>(null);
+  const [pendingRemovals, setPendingRemovals] = useState<PendingRemoval[]>([]);
   const removalController = useRef(createPendingRemoval());
-  const removalOpener = useRef<HTMLButtonElement | null>(null);
+  const inventoryResponseGuard = useRef(createInventoryResponseGuard());
+  const removalOpeners = useRef(new Map<string, HTMLButtonElement>());
+
+  function updatePendingRemovals(update: (current: PendingRemoval[]) => PendingRemoval[]) {
+    setPendingRemovals(update);
+  }
 
   const loadInventory = useCallback(async () => {
+    const load = inventoryResponseGuard.current.beginLoad();
     try {
       const response = await fetch("/api/inventory", { cache: "no-store" });
       if (!response.ok) throw new Error("Inventory could not be loaded.");
       const payload = await response.json() as { inventory: InventoryItem[] };
-      setParts(payload.inventory.map(presentPart));
+      load.apply(() => setParts(payload.inventory.map(presentPart)));
       setInventoryError("");
     } catch (error) {
       setInventoryError(error instanceof Error ? error.message : "Inventory could not be loaded.");
@@ -61,12 +72,13 @@ export default function Home() {
   }, [loadInventory]);
 
   const categories = ["All parts", ...INVENTORY_CATEGORIES];
-  const filtered = useMemo(() => parts.filter((part) => {
+  const displayedParts = useMemo(() => projectInventoryWithPending(parts, pendingRemovals), [parts, pendingRemovals]);
+  const filtered = useMemo(() => displayedParts.filter((part) => {
     const matchesCategory = category === "All parts" || part.category === category;
     const haystack = `${part.name} ${part.code} ${part.category} ${part.tags.join(" ")}`.toLowerCase();
     return matchesCategory && haystack.includes(query.toLowerCase());
-  }), [parts, query, category]);
-  const unitCount = parts.reduce((sum, part) => sum + part.quantity, 0);
+  }), [displayedParts, query, category]);
+  const unitCount = displayedParts.reduce((sum, part) => sum + part.quantity, 0);
 
   async function addPart(formData: FormData) {
     const name = String(formData.get("name") || "Unnamed component");
@@ -74,6 +86,7 @@ export default function Home() {
       const response = await fetch("/api/inventory", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, category: String(formData.get("category") || "Sensors"), quantity: Number(formData.get("quantity")) || 1, location: String(formData.get("location") || "Unsorted") }) });
       const payload = await response.json() as { item?: InventoryItem; error?: string };
       if (!response.ok || !payload.item) throw new Error(payload.error || "The component could not be added.");
+      inventoryResponseGuard.current.recordMutation();
       setParts((current) => [presentPart(payload.item!), ...current.filter((part) => part.id !== payload.item!.id)]);
       setInventoryError("");
       setIsAdding(false);
@@ -82,44 +95,57 @@ export default function Home() {
 
   function applyIdentified(identified: InventoryResult[]) {
     void identified;
+    inventoryResponseGuard.current.recordMutation();
     void loadInventory();
   }
 
   function scheduleRemoval(item: Part, quantity: number) {
-    const index = parts.findIndex((part) => part.id === item.id);
-    const restore = () => setParts((current) => {
-      const without = current.filter((part) => part.id !== item.id);
-      without.splice(Math.max(0, index), 0, item);
-      return without;
-    });
     const scheduled = removalController.current.schedule({
       item, quantity,
-      onOptimistic: () => setParts((current) => current.flatMap((part) => part.id !== item.id ? [part] : quantity === part.quantity ? [] : [{ ...part, quantity: part.quantity - quantity }])),
-      onRestore: restore,
+      onOptimistic: () => {},
+      onRestore: () => {},
       commit: async () => {
         const response = await fetch(`/api/inventory/${encodeURIComponent(item.id)}/remove`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ quantity, expectedCurrentQuantity: item.quantity }) });
         const payload = await response.json() as RemoveInventoryResult & { error?: string; item?: InventoryItem };
-        if (!response.ok) { const error = new Error(payload.error || "The component could not be removed.") as Error & { status?: number }; error.status = response.status; throw error; }
+        if (!response.ok) { const error = new Error(payload.error || "The component could not be removed.") as RemovalRequestError; error.status = response.status; error.item = payload.item; throw error; }
         return payload;
       },
-      onCommitted: () => { setPendingRemoval(null); setInventoryError(""); },
+      onCommitted: (result) => {
+        if (result) {
+          inventoryResponseGuard.current.recordMutation();
+          setParts((current) => result.deleted ? current.filter((part) => part.id !== result.id) : current.map((part) => part.id === result.item.id ? presentPart(result.item) : part));
+        }
+        updatePendingRemovals((current) => current.filter((pending) => pending.item.id !== item.id));
+        setInventoryError("");
+      },
       onError: (error) => {
-        setPendingRemoval(null);
+        updatePendingRemovals((current) => current.filter((pending) => pending.item.id !== item.id));
         setInventoryError(error instanceof Error ? error.message : "The component could not be removed.");
-        if (error && typeof error === "object" && "status" in error && error.status === 409) void loadInventory();
+        if (error && typeof error === "object" && "status" in error && error.status === 409) {
+          const conflict = error as RemovalRequestError;
+          if (conflict.item) {
+            inventoryResponseGuard.current.recordMutation();
+            setParts((current) => current.some((part) => part.id === conflict.item!.id) ? current.map((part) => part.id === conflict.item!.id ? presentPart(conflict.item!) : part) : [...current, presentPart(conflict.item)]);
+          }
+          void loadInventory();
+        }
       },
     });
-    if (scheduled) setPendingRemoval({ item, quantity, deadline: Date.now() + 10_000 });
+    if (scheduled) updatePendingRemovals((current) => [...current, { item, quantity, deadline: Date.now() + 10_000 }]);
     setRemoveItem(null);
   }
 
-  function undoRemoval() {
-    if (removalController.current.undo()) { setPendingRemoval(null); requestAnimationFrame(() => removalOpener.current?.focus()); }
+  function undoRemoval(id: string) {
+    if (removalController.current.undo(id)) {
+      updatePendingRemovals((current) => current.filter((pending) => pending.item.id !== id));
+      requestAnimationFrame(() => removalOpeners.current.get(id)?.focus());
+    }
   }
 
   function cancelRemoval() {
+    const id = removeItem?.id;
     setRemoveItem(null);
-    requestAnimationFrame(() => removalOpener.current?.focus());
+    if (id) requestAnimationFrame(() => removalOpeners.current.get(id)?.focus());
   }
 
   return (
@@ -147,7 +173,7 @@ export default function Home() {
               <p className="hero-copy">Catalog every board, sensor, and tiny mystery module—then turn your box of parts into real projects.</p>
             </div>
             <div className="hero-stats" aria-label="Inventory overview">
-              <div><strong>{parts.length}</strong><span>types catalogued</span></div>
+              <div><strong>{displayedParts.length}</strong><span>types catalogued</span></div>
               <div><strong>{unitCount}</strong><span>total components</span></div>
               <div><strong>{projects.length}</strong><span>projects planned</span></div>
             </div>
@@ -162,7 +188,7 @@ export default function Home() {
             <aside>
               <p className="aside-title">CATEGORIES</p>
               {categories.map((item) => {
-                const count = item === "All parts" ? parts.length : parts.filter((p) => p.category === item).length;
+                const count = item === "All parts" ? displayedParts.length : displayedParts.filter((p) => p.category === item).length;
                 return <button key={item} className={category === item ? "selected" : ""} onClick={() => setCategory(item)}><span>{item}</span><b>{count}</b></button>;
               })}
               <div className="identify-card">
@@ -178,7 +204,7 @@ export default function Home() {
               {inventoryLoading && <p className="inventory-message" role="status">Loading inventory…</p>}
               <div className="section-heading">
                 <div><p className="eyebrow">INVENTORY</p><h2>{category}</h2></div>
-                <p>Showing {filtered.length} of {parts.length} component types</p>
+                <p>Showing {filtered.length} of {displayedParts.length} component types</p>
               </div>
               <div className="parts-grid">
                 {filtered.map((part) => (
@@ -189,7 +215,7 @@ export default function Home() {
                       <h3>{part.name}</h3>
                       <p>{part.description}</p>
                       <div className="tags">{part.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>
-                      <footer><span>⌖ {part.location}</span><button className="remove-part-button" disabled={Boolean(pendingRemoval)} onClick={(event) => { removalOpener.current = event.currentTarget; setRemoveItem(part); }} aria-label={`Remove ${part.name} from inventory`}>Remove</button></footer>
+                      <footer><span>⌖ {part.location}</span><button ref={(element) => { if (element) removalOpeners.current.set(part.id, element); else removalOpeners.current.delete(part.id); }} className="remove-part-button" disabled={pendingRemovals.some((pending) => pending.item.id === part.id)} onClick={() => setRemoveItem(part)} aria-label={`Remove ${part.name} from inventory`}>Remove</button></footer>
                     </div>
                   </article>
                 ))}
@@ -241,7 +267,9 @@ export default function Home() {
       </div>}
       {isIdentifying && <IdentificationWorkspace onClose={() => setIsIdentifying(false)} onConfirmed={applyIdentified} />}
       {removeItem && <RemoveInventoryDialog item={removeItem} onCancel={cancelRemoval} onConfirm={(quantity) => scheduleRemoval(removeItem, quantity)} />}
-      {pendingRemoval && <PendingRemovalToast quantity={pendingRemoval.quantity} name={pendingRemoval.item.name} deadline={pendingRemoval.deadline} onUndo={undoRemoval} />}
+      {pendingRemovals.length > 0 && <div className="removal-toast-stack">
+        {pendingRemovals.map((pending) => <PendingRemovalToast key={pending.item.id} quantity={pending.quantity} name={pending.item.name} deadline={pending.deadline} onUndo={() => undoRemoval(pending.item.id)} />)}
+      </div>}
     </main>
   );
 }

@@ -21,15 +21,17 @@ export function createPendingRemoval(options?: { delayMs?: number; timer?: Timer
     setTimeout: (callback, delay) => globalThis.setTimeout(callback, delay),
     clearTimeout: (id) => globalThis.clearTimeout(id as ReturnType<typeof setTimeout>),
   };
-  let pending: { operation: PendingRemovalOperation; timeout: unknown } | null = null;
+  const pending = new Map<string, { operation: PendingRemovalOperation; timeout: unknown }>();
 
   return {
     schedule(operation: PendingRemovalOperation): boolean {
-      if (pending) return false;
+      const id = operation.item.id;
+      if (pending.has(id)) return false;
       operation.onOptimistic();
       const timeout = timer.setTimeout(async () => {
-        if (!pending || pending.operation !== operation) return;
-        pending = null;
+        const entry = pending.get(id);
+        if (!entry || entry.operation !== operation) return;
+        pending.delete(id);
         try {
           const result = await operation.commit();
           operation.onCommitted?.(result);
@@ -38,22 +40,23 @@ export function createPendingRemoval(options?: { delayMs?: number; timer?: Timer
           operation.onError?.(error);
         }
       }, delayMs);
-      pending = { operation, timeout };
+      pending.set(id, { operation, timeout });
       return true;
     },
-    undo(): boolean {
-      if (!pending) return false;
-      timer.clearTimeout(pending.timeout);
-      const { operation } = pending;
-      pending = null;
+    undo(id: string): boolean {
+      const entry = pending.get(id);
+      if (!entry) return false;
+      timer.clearTimeout(entry.timeout);
+      pending.delete(id);
+      const { operation } = entry;
       operation.onRestore();
       return true;
     },
-    hasPending(): boolean { return pending !== null; },
+    hasPending(id?: string): boolean { return id === undefined ? pending.size > 0 : pending.has(id); },
+    pendingIds(): string[] { return [...pending.keys()]; },
     dispose(): void {
-      if (!pending) return;
-      timer.clearTimeout(pending.timeout);
-      pending = null;
+      for (const entry of pending.values()) timer.clearTimeout(entry.timeout);
+      pending.clear();
     },
   };
 }
