@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { normalizeIdentity, validateConfirmationPayload, validateGeminiPayload } from "../lib/identification/validation.ts";
+import { normalizeCategory, normalizeIdentity, validateConfirmationPayload, validateGeminiPayload } from "../lib/identification/validation.ts";
 
 const sample = {
   name: "PIR motion sensor", model: null, category: "Sensors", quantity: 2,
@@ -26,4 +26,34 @@ test("validates edited confirmation rows", () => {
   const payload = validateConfirmationPayload({ token: "signed-token", items: [{ ...sample, name: "HC-SR501 PIR sensor", detectedName: "PIR motion sensor", detectedModel: null, id: "row-1", accepted: true, source: "gemini" }] });
   assert.equal(payload.items[0].model, null);
   assert.equal(payload.items[0].detectedName, "PIR motion sensor");
+});
+
+test("ignores rejected incomplete rows during confirmation", () => {
+  const payload = validateConfirmationPayload({ token: "signed-token", items: [
+    { ...sample, id: "accepted", accepted: true, source: "gemini" },
+    { ...sample, id: "rejected", accepted: false, source: "manual", name: "" },
+  ] });
+  assert.equal(payload.items.length, 1);
+  assert.equal(payload.items[0].id, "accepted");
+});
+
+test("identifies the component with an invalid name", () => {
+  assert.throws(() => validateConfirmationPayload({ token: "signed-token", items: [
+    { ...sample, id: "first", accepted: true, source: "gemini" },
+    { ...sample, id: "second", accepted: true, source: "manual", name: "" },
+  ] }), /Component 2: Name is required/);
+});
+
+test("normalizes provider categories to inventory categories", () => {
+  assert.equal(normalizeCategory("sensor"), "Sensors");
+  assert.equal(normalizeCategory("ESP32-CAM development board"), "Cameras & Vision");
+  assert.equal(normalizeCategory("ESP32 development board"), "Microcontrollers & Compute");
+  assert.equal(normalizeCategory("display module"), "Displays & Indicators");
+  assert.equal(normalizeCategory("jumper cables"), "Wiring & Connectors");
+  assert.equal(normalizeCategory("breadboard"), "Prototyping & PCB");
+  assert.equal(normalizeCategory("18650 battery"), "Power Sources");
+  assert.equal(normalizeCategory("buck converter"), "Power Management");
+  assert.equal(normalizeCategory("sensor board"), "Sensors");
+  assert.equal(normalizeCategory("motor driver board"), "Motor Drivers & Power Drivers");
+  assert.equal(normalizeCategory("mystery object"), "Others");
 });
