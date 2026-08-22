@@ -23,7 +23,16 @@ test("server-renders the Parts Cabinet application", async () => {
   assert.match(html, />Parts Cabinet</);
   assert.match(html, />Inventory</);
   assert.match(html, /Identify a part/);
-  assert.match(html, /Arduino Uno R3/);
+  assert.match(html, /Loading inventory/);
+});
+
+test("renders the persistent inventory and removal contracts", async () => {
+  const html = await (await render()).text();
+  assert.doesNotMatch(html, /Arduino Uno R3/);
+  const dialogSource = await import("node:fs/promises").then((fs) => fs.readFile(new URL("../app/components/RemoveInventoryDialog.tsx", import.meta.url), "utf8"));
+  assert.match(dialogSource, /Quantity to remove/);
+  assert.match(dialogSource, /Confirm removal/);
+  assert.match(dialogSource, /permanently deletes all/);
 });
 
 test("does not render the disposable starter preview", async () => {

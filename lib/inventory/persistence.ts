@@ -42,8 +42,8 @@ export async function removeInventoryQuantity(input: RemoveInventoryInput, db: D
 
   if (input.quantity === current.quantity) {
     await db.batch([
-      db.prepare("DELETE FROM identification_events WHERE inventory_part_id=?").bind(input.id),
-      db.prepare("DELETE FROM inventory_adjustment_events WHERE inventory_part_id=?").bind(input.id),
+      db.prepare("DELETE FROM identification_events WHERE inventory_part_id=? AND EXISTS(SELECT 1 FROM inventory_parts WHERE id=? AND quantity=?)").bind(input.id, input.id, current.quantity),
+      db.prepare("DELETE FROM inventory_adjustment_events WHERE inventory_part_id=? AND EXISTS(SELECT 1 FROM inventory_parts WHERE id=? AND quantity=?)").bind(input.id, input.id, current.quantity),
       db.prepare("DELETE FROM inventory_parts WHERE id=? AND quantity=?").bind(input.id, current.quantity),
     ]);
     return { deleted: true, id: input.id };
@@ -51,8 +51,8 @@ export async function removeInventoryQuantity(input: RemoveInventoryInput, db: D
 
   const quantity = current.quantity - input.quantity;
   await db.batch([
+    db.prepare("INSERT INTO inventory_adjustment_events(id,inventory_part_id,event_type,quantity_before,quantity_removed,quantity_after) SELECT ?,?,'remove',?,?,? WHERE EXISTS(SELECT 1 FROM inventory_parts WHERE id=? AND quantity=?)").bind(crypto.randomUUID(), input.id, current.quantity, input.quantity, quantity, input.id, current.quantity),
     db.prepare("UPDATE inventory_parts SET quantity=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND quantity=?").bind(quantity, input.id, current.quantity),
-    db.prepare("INSERT INTO inventory_adjustment_events(id,inventory_part_id,event_type,quantity_before,quantity_removed,quantity_after) VALUES(?,?,'remove',?,?,?)").bind(crypto.randomUUID(), input.id, current.quantity, input.quantity, quantity),
   ]);
   return { deleted: false, item: { ...current, quantity } };
 }

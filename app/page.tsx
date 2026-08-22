@@ -1,34 +1,22 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import IdentificationWorkspace from "./components/IdentificationWorkspace";
+import PendingRemovalToast from "./components/PendingRemovalToast";
+import RemoveInventoryDialog from "./components/RemoveInventoryDialog";
 import { INVENTORY_CATEGORIES } from "../lib/identification/validation.ts";
+import { createPendingRemoval } from "../lib/inventory/pending-removal.ts";
+import type { InventoryItem, RemoveInventoryResult } from "../lib/inventory/types.ts";
 import type { InventoryResult } from "../lib/identification/types";
 
-type Part = {
-  id: number | string;
-  name: string;
-  category: string;
-  quantity: number;
-  location: string;
-  code: string;
+type Part = InventoryItem & {
   tone: string;
   symbol: string;
-  description: string;
-  tags: string[];
 };
 
-const starterParts: Part[] = [
-  { id: 1, name: "Arduino Uno R3", category: "Microcontrollers & Compute", quantity: 3, location: "Bin A1", code: "ARD-UNO", tone: "blue", symbol: "UNO", description: "ATmega328P development board for rapid prototyping.", tags: ["5V", "Digital", "Analog"] },
-  { id: 2, name: "ESP32 DevKit V1", category: "Microcontrollers & Compute", quantity: 2, location: "Bin A2", code: "ESP-32", tone: "navy", symbol: "32", description: "Wi-Fi and Bluetooth enabled microcontroller board.", tags: ["Wi-Fi", "Bluetooth", "3.3V"] },
-  { id: 3, name: "DHT22", category: "Sensors", quantity: 4, location: "Bin B1", code: "SNS-DHT22", tone: "white", symbol: "°%", description: "Digital temperature and humidity sensor.", tags: ["Temperature", "Humidity", "Digital"] },
-  { id: 4, name: "HC-SR04", category: "Sensors", quantity: 6, location: "Bin B2", code: "SNS-US04", tone: "teal", symbol: ")))", description: "Ultrasonic distance sensor with a 2–400 cm range.", tags: ["Distance", "5V", "Digital"] },
-  { id: 5, name: "PIR Motion Sensor", category: "Sensors", quantity: 2, location: "Bin B3", code: "SNS-PIR", tone: "mint", symbol: "PIR", description: "Passive infrared sensor for detecting human motion.", tags: ["Motion", "Digital", "5V"] },
-  { id: 6, name: "L298N Motor Driver", category: "Motor Drivers & Power Drivers", quantity: 2, location: "Bin C1", code: "DRV-L298", tone: "red", symbol: "M↔", description: "Dual H-bridge driver for DC motors and steppers.", tags: ["Motor", "12V", "Dual channel"] },
-  { id: 7, name: "SG90 Micro Servo", category: "Motors & Actuators", quantity: 8, location: "Bin C2", code: "ACT-SG90", tone: "sky", symbol: "90°", description: "Compact 180° positional servo for lightweight mechanisms.", tags: ["Servo", "PWM", "5V"] },
-  { id: 8, name: "Soil Moisture Probe", category: "Sensors", quantity: 5, location: "Bin B4", code: "SNS-SOIL", tone: "green", symbol: "H₂O", description: "Analog probe for estimating soil moisture levels.", tags: ["Soil", "Analog", "Farm"] },
-  { id: 9, name: "Mini Breadboard", category: "Prototyping & PCB", quantity: 7, location: "Bin D1", code: "PRT-BRD", tone: "cream", symbol: "•••", description: "170-point solderless board for compact circuits.", tags: ["Prototype", "Reusable"] },
-];
+function presentPart(item: InventoryItem): Part {
+  return { ...item, tone: "purple", symbol: item.name.slice(0, 3).toUpperCase() };
+}
 
 const projects = [
   { name: "Elderly monitoring camera", state: "In progress", accent: "coral", owned: 6, total: 8, next: "Add local video storage", missing: ["ESP32-CAM", "MicroSD module"], icon: "CAM" },
@@ -42,11 +30,35 @@ const nav = ["Inventory", "Projects"] as const;
 
 export default function Home() {
   const [view, setView] = useState<(typeof nav)[number]>("Inventory");
-  const [parts, setParts] = useState(starterParts);
+  const [parts, setParts] = useState<Part[]>([]);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("All parts");
   const [isAdding, setIsAdding] = useState(false);
   const [isIdentifying, setIsIdentifying] = useState(false);
+  const [inventoryError, setInventoryError] = useState("");
+  const [inventoryLoading, setInventoryLoading] = useState(true);
+  const [removeItem, setRemoveItem] = useState<Part | null>(null);
+  const [pendingRemoval, setPendingRemoval] = useState<{ item: Part; quantity: number; deadline: number } | null>(null);
+  const removalController = useRef(createPendingRemoval());
+  const removalOpener = useRef<HTMLButtonElement | null>(null);
+
+  const loadInventory = useCallback(async () => {
+    try {
+      const response = await fetch("/api/inventory", { cache: "no-store" });
+      if (!response.ok) throw new Error("Inventory could not be loaded.");
+      const payload = await response.json() as { inventory: InventoryItem[] };
+      setParts(payload.inventory.map(presentPart));
+      setInventoryError("");
+    } catch (error) {
+      setInventoryError(error instanceof Error ? error.message : "Inventory could not be loaded.");
+    } finally { setInventoryLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    const controller = removalController.current;
+    const start = window.setTimeout(() => void loadInventory(), 0);
+    return () => { window.clearTimeout(start); controller.dispose(); };
+  }, [loadInventory]);
 
   const categories = ["All parts", ...INVENTORY_CATEGORIES];
   const filtered = useMemo(() => parts.filter((part) => {
@@ -59,7 +71,7 @@ export default function Home() {
   function addPart(formData: FormData) {
     const name = String(formData.get("name") || "Unnamed component");
     const newPart: Part = {
-      id: Date.now(), name, category: String(formData.get("category") || "Sensors"),
+      id: crypto.randomUUID(), name, model: null, category: String(formData.get("category") || "Sensors"),
       quantity: Number(formData.get("quantity")) || 1, location: String(formData.get("location") || "Unsorted"),
       code: `NEW-${parts.length + 1}`, tone: "purple", symbol: name.slice(0, 3).toUpperCase(),
       description: "Newly catalogued component. Add notes after identification.", tags: ["New", "Needs review"],
@@ -69,15 +81,45 @@ export default function Home() {
   }
 
   function applyIdentified(identified: InventoryResult[]) {
-    setParts((current) => {
-      const next = [...current];
-      for (const item of identified) {
-        const index = next.findIndex((part) => part.name.toLowerCase() === item.name.toLowerCase());
-        const converted: Part = { id: item.id, name: item.name, category: item.category, quantity: item.quantity, location: "Unsorted", code: item.model || "MODEL-UNKNOWN", tone: "purple", symbol: item.name.slice(0, 3).toUpperCase(), description: item.description, tags: item.tags };
-        if (index >= 0) next[index] = { ...next[index], ...converted }; else next.unshift(converted);
-      }
-      return next;
+    void identified;
+    void loadInventory();
+  }
+
+  function scheduleRemoval(item: Part, quantity: number) {
+    const index = parts.findIndex((part) => part.id === item.id);
+    const restore = () => setParts((current) => {
+      const without = current.filter((part) => part.id !== item.id);
+      without.splice(Math.max(0, index), 0, item);
+      return without;
     });
+    const scheduled = removalController.current.schedule({
+      item, quantity,
+      onOptimistic: () => setParts((current) => current.flatMap((part) => part.id !== item.id ? [part] : quantity === part.quantity ? [] : [{ ...part, quantity: part.quantity - quantity }])),
+      onRestore: restore,
+      commit: async () => {
+        const response = await fetch(`/api/inventory/${encodeURIComponent(item.id)}/remove`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ quantity, expectedCurrentQuantity: item.quantity }) });
+        const payload = await response.json() as RemoveInventoryResult & { error?: string; item?: InventoryItem };
+        if (!response.ok) { const error = new Error(payload.error || "The component could not be removed.") as Error & { status?: number }; error.status = response.status; throw error; }
+        return payload;
+      },
+      onCommitted: () => { setPendingRemoval(null); setInventoryError(""); },
+      onError: (error) => {
+        setPendingRemoval(null);
+        setInventoryError(error instanceof Error ? error.message : "The component could not be removed.");
+        if (error && typeof error === "object" && "status" in error && error.status === 409) void loadInventory();
+      },
+    });
+    if (scheduled) setPendingRemoval({ item, quantity, deadline: Date.now() + 10_000 });
+    setRemoveItem(null);
+  }
+
+  function undoRemoval() {
+    if (removalController.current.undo()) { setPendingRemoval(null); requestAnimationFrame(() => removalOpener.current?.focus()); }
+  }
+
+  function cancelRemoval() {
+    setRemoveItem(null);
+    requestAnimationFrame(() => removalOpener.current?.focus());
   }
 
   return (
@@ -132,6 +174,8 @@ export default function Home() {
             </aside>
 
             <div className="parts-panel">
+              {inventoryError && <p className="inventory-message error" role="alert">{inventoryError} <button type="button" onClick={() => void loadInventory()}>Retry</button></p>}
+              {inventoryLoading && <p className="inventory-message" role="status">Loading inventory…</p>}
               <div className="section-heading">
                 <div><p className="eyebrow">INVENTORY</p><h2>{category}</h2></div>
                 <p>Showing {filtered.length} of {parts.length} component types</p>
@@ -145,7 +189,7 @@ export default function Home() {
                       <h3>{part.name}</h3>
                       <p>{part.description}</p>
                       <div className="tags">{part.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>
-                      <footer><span>⌖ {part.location}</span><button aria-label={`More options for ${part.name}`}>•••</button></footer>
+                      <footer><span>⌖ {part.location}</span><button className="remove-part-button" disabled={Boolean(pendingRemoval)} onClick={(event) => { removalOpener.current = event.currentTarget; setRemoveItem(part); }} aria-label={`Remove ${part.name} from inventory`}>Remove</button></footer>
                     </div>
                   </article>
                 ))}
@@ -196,6 +240,8 @@ export default function Home() {
         </div>
       </div>}
       {isIdentifying && <IdentificationWorkspace onClose={() => setIsIdentifying(false)} onConfirmed={applyIdentified} />}
+      {removeItem && <RemoveInventoryDialog item={removeItem} onCancel={cancelRemoval} onConfirm={(quantity) => scheduleRemoval(removeItem, quantity)} />}
+      {pendingRemoval && <PendingRemovalToast quantity={pendingRemoval.quantity} name={pendingRemoval.item.name} deadline={pendingRemoval.deadline} onUndo={undoRemoval} />}
     </main>
   );
 }
