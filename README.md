@@ -94,6 +94,17 @@ actions tied to the current ChatGPT user. Leave public content anonymous.
 - `npm test`: build the starter and verify its rendered loading skeleton
 - `npm run db:generate`: generate Drizzle migrations after schema changes
 
+## Camera component identification
+
+The inventory can identify several electronics components from one camera photo or uploaded JPG, PNG, or WebP image. Gemini returns likely names, models, counts, confidence, visible markings, and alternatives. Every result remains editable and nothing is written until the user confirms the reviewed batch.
+
+1. Copy `.env.example` to `.env.local`.
+2. Set `GEMINI_API_KEY` to a key created in Google AI Studio.
+3. Set `CONFIRMATION_TOKEN_SECRET` to a random secret of at least 16 characters.
+4. Apply `drizzle/0000_camera_identification.sql` to the D1 database before confirming a scan.
+
+The prototype defaults to `gemini-3.1-flash-lite`, accepts images up to 10 MiB, and does not store uploaded image bytes, paths, or URLs. Images are sent to the Gemini API for processing; review Google's free-tier data-use terms before enabling uploads for users.
+
 ## Learn More
 
 - [vinext Documentation](https://github.com/cloudflare/vinext)
