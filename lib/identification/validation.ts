@@ -1,4 +1,5 @@
 import type { Alternative, BoundingBox, ConfirmRequest, Detection, ReviewItem } from "./types.ts";
+import { validatePartImage } from "./image.ts";
 
 const MAX_ITEMS = 50;
 export const INVENTORY_CATEGORIES = ["Microcontrollers & Compute", "Sensors", "Cameras & Vision", "Motors & Actuators", "Motor Drivers & Power Drivers", "Power Sources", "Power Management", "Communication Modules", "Displays & Indicators", "Input & Controls", "Passive Components", "Active Components", "Prototyping & PCB", "Wiring & Connectors", "Mechanical / Robotics", "Fasteners & Mounting", "Tools & Test Equipment", "Consumables", "Storage / Spare Parts", "Others"] as const;
@@ -58,6 +59,12 @@ const box = (value: unknown): BoundingBox => {
   return result;
 };
 
+/** Short label shown on a part card. Falls back to the model-unknown marker. */
+export function partCode(model: string | null) {
+  const code = (model ?? "").normalize("NFKC").toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 14).replace(/-+$/, "");
+  return code || "MODEL-UNKNOWN";
+}
+
 export function normalizeIdentity(value: string) {
   return value.normalize("NFKC").replace(/[‐‑‒–—―]/g, "-").trim().replace(/\s+/g, " ").toLowerCase();
 }
@@ -90,7 +97,8 @@ export function validateConfirmationPayload(value: unknown): ConfirmRequest {
     if (!row.accepted) return [];
     try {
       const base = detection({ ...row, boundingBox: row.boundingBox ?? { top: 0, left: 0, width: 1, height: 1 }, confidence: row.confidence ?? 0 });
-      return [{ ...base, id: row.id, accepted: true, source: row.source as "gemini" | "manual", boundingBox: row.boundingBox === null ? null : base.boundingBox, confidence: row.confidence === null ? null : base.confidence, detectedName: row.source === "gemini" ? nullableText(row.detectedName ?? row.name, "Detected name") : null, detectedModel: row.source === "gemini" ? nullableText(row.detectedModel ?? row.model, "Detected model") : null }];
+      const location = row.location === undefined || row.location === null || row.location === "" ? "Unsorted" : text(row.location, "Storage location");
+      return [{ ...base, id: row.id, accepted: true, source: row.source as "gemini" | "manual", boundingBox: row.boundingBox === null ? null : base.boundingBox, confidence: row.confidence === null ? null : base.confidence, detectedName: row.source === "gemini" ? nullableText(row.detectedName ?? row.name, "Detected name") : null, detectedModel: row.source === "gemini" ? nullableText(row.detectedModel ?? row.model, "Detected model") : null, location, image: validatePartImage(row.image) }];
     } catch (error) {
       throw new Error(`Component ${index + 1}: ${error instanceof Error ? error.message : "Invalid data"}`);
     }

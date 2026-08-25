@@ -96,14 +96,47 @@ actions tied to the current ChatGPT user. Leave public content anonymous.
 
 ## Camera component identification
 
-The inventory can identify several electronics components from one camera photo or uploaded JPG, PNG, or WebP image. Gemini returns likely names, models, counts, confidence, visible markings, and alternatives. Every result remains editable and nothing is written until the user confirms the reviewed batch.
+Camera identification is the way parts enter the cabinet. One photo identifies
+several electronics components at once, and each confirmed part is filed with a
+cropped picture of itself taken from that photo.
 
 1. Copy `.env.example` to `.env.local`.
 2. Set `GEMINI_API_KEY` to a key created in Google AI Studio.
 3. Set `CONFIRMATION_TOKEN_SECRET` to a random secret of at least 16 characters.
-4. Apply `drizzle/0000_camera_identification.sql` to the D1 database before confirming a scan.
+4. Apply the migrations in `drizzle/` to the D1 database in order before
+   confirming a scan.
 
-The prototype defaults to `gemini-3.1-flash-lite`, accepts images up to 10 MiB, and does not store uploaded image bytes, paths, or URLs. Images are sent to the Gemini API for processing; review Google's free-tier data-use terms before enabling uploads for users.
+The flow:
+
+- **Identify with camera** is the primary action in the header, the hero, the
+  toolbar, and the empty state. It opens the review workspace.
+- Gemini returns likely names, models, counts, confidence, visible markings, and
+  alternatives, each with a bounding box drawn over the photo.
+- Every detection is cropped from that photo in the browser and shown beside the
+  row, so the picture is reviewed together with the name.
+- **Add a part by hand instead** appends a blank row to the same review list.
+  Manual rows carry the same fields, take an optional photo, and are saved
+  through the same confirmation. There is no separate add-a-component form.
+- Nothing is written until the reviewed batch is confirmed.
+
+### Part photos
+
+Confirmed parts store a cropped thumbnail as a data URL in `inventory_parts.image`:
+
+- Cropping, downscaling, and encoding happen in the browser. Tiles are at most
+  320 px on the long edge and are re-encoded down a quality ladder until they fit
+  the 160 KB per-part budget, so they stay far below D1's value limit.
+- The full uploaded photo is still never stored, and its bytes never reach the
+  database — only the confirmed crops do.
+- Parts without a photo keep the lettered tile and offer **Add photo** on the
+  card, which crops and stores an image the same way through
+  `POST /api/inventory/:id/photo`.
+- Re-scanning a part that already has a photo keeps the existing crop unless the
+  new scan supplies one.
+
+The prototype defaults to `gemini-3.1-flash-lite`, accepts images up to 10 MiB,
+and sends them to the Gemini API for processing; review Google's free-tier
+data-use terms before enabling uploads for users.
 
 ## Learn More
 

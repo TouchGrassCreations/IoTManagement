@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { handleInventoryCreate, handleInventoryList } from "../app/api/inventory/route.ts";
+import { handleInventoryList } from "../app/api/inventory/route.ts";
+import { handleInventoryPhoto } from "../app/api/inventory/[id]/photo/route.ts";
 import { handleInventoryRemoval } from "../app/api/inventory/[id]/remove/route.ts";
 import { InventoryNotFoundError, InventoryQuantityConflictError } from "../lib/inventory/persistence.ts";
 
-const item = { id: "part-1", name: "PIR Motion Sensor", model: null, category: "Sensors", quantity: 5, location: "Bin B3", code: "SNS-PIR", description: "Motion sensor", tags: ["Motion"] };
+const item = { id: "part-1", name: "PIR Motion Sensor", model: null, category: "Sensors", quantity: 5, location: "Bin B3", code: "SNS-PIR", description: "Motion sensor", tags: ["Motion"], image: null };
 const request = (body) => new Request("http://test/api/inventory/part-1/remove", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
 test("GET returns current inventory", async () => {
@@ -13,12 +14,29 @@ test("GET returns current inventory", async () => {
   assert.deepEqual(await response.json(), { inventory: [item] });
 });
 
-test("POST validates and persists manual inventory", async () => {
+const photoRequest = (body) => new Request("http://test/api/inventory/part-1/photo", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+const photo = `data:image/webp;base64,${"A".repeat(120)}`;
+
+test("photo route stores a validated crop", async () => {
   let received;
-  const response = await handleInventoryCreate(new Request("http://test/api/inventory", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "PIR Motion Sensor", category: "Sensors", quantity: 2, location: "Bin B3" }) }), { create: async (input) => { received = input; return item; } });
-  assert.equal(response.status, 201);
-  assert.equal(received.quantity, 2);
-  assert.deepEqual(await response.json(), { item });
+  const response = await handleInventoryPhoto(photoRequest({ image: photo }), "part-1", { setImage: async (input) => { received = input; return { ...item, image: photo }; } });
+  assert.equal(response.status, 200);
+  assert.deepEqual(received, { id: "part-1", image: photo });
+  assert.equal((await response.json()).item.image, photo);
+});
+
+test("photo route clears a photo and rejects foreign sources", async () => {
+  const cleared = await handleInventoryPhoto(photoRequest({ image: null }), "part-1", { setImage: async (input) => { assert.equal(input.image, null); return item; } });
+  assert.equal(cleared.status, 200);
+  const remote = await handleInventoryPhoto(photoRequest({ image: "https://example.com/part.png" }), "part-1", { setImage: async () => { throw new Error("must not run"); } });
+  assert.equal(remote.status, 400);
+  const oversized = await handleInventoryPhoto(photoRequest({ image: `data:image/webp;base64,${"A".repeat(200_000)}` }), "part-1", { setImage: async () => { throw new Error("must not run"); } });
+  assert.equal(oversized.status, 400);
+});
+
+test("photo route maps a missing part to 404", async () => {
+  const response = await handleInventoryPhoto(photoRequest({ image: photo }), "missing", { setImage: async () => { throw new InventoryNotFoundError("missing"); } });
+  assert.equal(response.status, 404);
 });
 
 test("remove maps stale stock to 409 with current inventory", async () => {
