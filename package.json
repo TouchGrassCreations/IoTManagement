@@ -10,7 +10,7 @@
     "build": "vinext build",
     "start": "vinext start",
     "test": "npm run build && node --test tests/rendered-html.test.mjs",
-    "test:unit": "node --experimental-strip-types --test tests/identification-routes.test.mjs tests/identification-validation.test.mjs tests/inventory-migration.test.mjs tests/inventory-persistence.test.mjs tests/inventory-response-guard.test.mjs tests/inventory-routes.test.mjs tests/optimistic-inventory.test.mjs tests/pending-removal.test.mjs",
+    "test:unit": "node --experimental-strip-types --test tests/identification-routes.test.mjs tests/identification-validation.test.mjs tests/inventory-migration.test.mjs tests/inventory-persistence.test.mjs tests/inventory-photo-round-trip.test.mjs tests/inventory-response-guard.test.mjs tests/inventory-routes.test.mjs tests/optimistic-inventory.test.mjs tests/part-image.test.mjs tests/pending-removal.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
   },

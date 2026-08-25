@@ -28,6 +28,20 @@ test("validates edited confirmation rows", () => {
   assert.equal(payload.items[0].detectedName, "PIR motion sensor");
 });
 
+test("keeps the cropped photo and storage location on confirmed rows", () => {
+  const photo = `data:image/webp;base64,${"A".repeat(80)}`;
+  const payload = validateConfirmationPayload({ token: "signed-token", items: [{ ...sample, id: "row-1", accepted: true, source: "gemini", image: photo, location: "Bin B3" }] });
+  assert.equal(payload.items[0].image, photo);
+  assert.equal(payload.items[0].location, "Bin B3");
+});
+
+test("defaults a photoless manual row and rejects a foreign photo source", () => {
+  const payload = validateConfirmationPayload({ token: "signed-token", items: [{ ...sample, id: "row-1", accepted: true, source: "manual", boundingBox: null, confidence: null }] });
+  assert.equal(payload.items[0].image, null);
+  assert.equal(payload.items[0].location, "Unsorted");
+  assert.throws(() => validateConfirmationPayload({ token: "signed-token", items: [{ ...sample, id: "row-1", accepted: true, source: "gemini", image: "https://example.com/part.png" }] }), /Component 1: Photo/);
+});
+
 test("ignores rejected incomplete rows during confirmation", () => {
   const payload = validateConfirmationPayload({ token: "signed-token", items: [
     { ...sample, id: "accepted", accepted: true, source: "gemini" },

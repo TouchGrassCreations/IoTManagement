@@ -26,6 +26,20 @@ test("server-renders the Parts Cabinet application", async () => {
   assert.match(html, /Loading inventory/);
 });
 
+test("leads the catalogue with camera identification", async () => {
+  const html = await (await render()).text();
+  assert.match(html, /Identify with camera/);
+  assert.match(html, /Identify &amp;? ?catalogue/);
+  assert.doesNotMatch(html, /Add component/);
+  const pageSource = await import("node:fs/promises").then((fs) => fs.readFile(new URL("../app/page.tsx", import.meta.url), "utf8"));
+  assert.doesNotMatch(pageSource, /handleInventoryCreate|isAdding/);
+  assert.match(pageSource, /attach-photo-button/);
+  assert.match(pageSource, /part\.image \? <img/);
+  const workspaceSource = await import("node:fs/promises").then((fs) => fs.readFile(new URL("../app/components/IdentificationWorkspace.tsx", import.meta.url), "utf8"));
+  assert.match(workspaceSource, /cropDetections/);
+  assert.match(workspaceSource, /Add a part by hand instead/);
+});
+
 test("renders the persistent inventory and removal contracts", async () => {
   const html = await (await render()).text();
   assert.doesNotMatch(html, /Arduino Uno R3/);

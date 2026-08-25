@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { handleIdentifyRequest } from "../app/api/identify/route.ts";
 import { handleConfirmRequest } from "../app/api/identify/confirm/route.ts";
+import { handleIdentifyTokenRequest } from "../app/api/identify/token/route.ts";
 import { recognizeComponents } from "../lib/identification/gemini.ts";
 
 const sample = { name: "HC-SR04 ultrasonic sensor", model: "HC-SR04", category: "Sensors", quantity: 1, boundingBox: { top: .1, left: .1, width: .3, height: .2 }, confidence: .93, visibleMarkings: ["HC-SR04"], alternatives: [], description: "Ultrasonic distance sensor", tags: ["distance", "5V"] };
@@ -121,4 +122,24 @@ test("confirmation persists only accepted reviewed rows", async () => {
   assert.equal(response.status, 200);
   assert.equal(received.items.filter((item) => item.accepted).length, 1);
   assert.equal((await response.json()).scanId, "scan-1");
+});
+
+test("issues a confirmation token for a manual-only batch", async () => {
+  const response = await handleIdentifyTokenRequest({ issueToken: async () => "signed-token" });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { token: "signed-token" });
+});
+
+test("surfaces an unconfigured token secret instead of a token", async () => {
+  const response = await handleIdentifyTokenRequest({ issueToken: async () => { throw new Error("Confirmation token secret is not configured"); } });
+  assert.equal(response.status, 500);
+  assert.match((await response.json()).error, /not configured/);
+});
+
+test("confirmation forwards the cropped photo of each reviewed part", async () => {
+  let received;
+  const photo = `data:image/webp;base64,${"A".repeat(80)}`;
+  await handleConfirmRequest(new Request("http://test/api/identify/confirm", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token: "signed-token", items: [{ ...sample, id: "one", accepted: true, source: "gemini", image: photo, location: "Bin B3" }] }) }), { confirm: async (input) => { received = input; return { scanId: "scan-1", inventory: [] }; } });
+  assert.equal(received.items[0].image, photo);
+  assert.equal(received.items[0].location, "Bin B3");
 });

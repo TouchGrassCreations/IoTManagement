@@ -8,6 +8,7 @@ export type InventoryItem = {
   code: string;
   description: string;
   tags: string[];
+  image: string | null;
 };
 
 export type RemoveInventoryInput = {
@@ -16,11 +17,9 @@ export type RemoveInventoryInput = {
   expectedCurrentQuantity: number;
 };
 
-export type CreateInventoryInput = {
-  name: string;
-  category: string;
-  quantity: number;
-  location: string;
+export type SetInventoryImageInput = {
+  id: string;
+  image: string | null;
 };
 
 export type RemoveInventoryResult =
