@@ -92,8 +92,12 @@ export default function InventoryView({ refreshToken, onIdentify }: { refreshTok
 
   useEffect(() => {
     const controller = removalController.current;
-    void load();
-    return () => controller.dispose();
+    // Deferred a tick so the fetch's first setState lands outside the effect body.
+    const start = window.setTimeout(() => void load(), 0);
+    return () => {
+      window.clearTimeout(start);
+      controller.dispose();
+    };
   }, [load, refreshToken]);
 
   async function loadMore() {
