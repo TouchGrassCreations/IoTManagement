@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 const createdAt = () => text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`);
 const updatedAt = () => text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`);
@@ -87,5 +87,58 @@ export const inventoryAdjustmentEvents = sqliteTable(
   (table) => [
     index("idx_inventory_adjustment_events_part_id").on(table.inventoryPartId),
     index("idx_inventory_adjustment_events_owner").on(table.ownerId, table.createdAt),
+  ],
+);
+
+export const projects = sqliteTable(
+  "projects",
+  {
+    id: text("id").primaryKey(),
+    ownerId: ownerId(),
+    name: text("name").notNull(),
+    normalizedName: text("normalized_name").notNull(),
+    summary: text("summary").notNull().default(""),
+    state: text("state").notNull().default("planned"),
+    accent: text("accent").notNull().default("green"),
+    icon: text("icon").notNull().default("PRJ"),
+    nextStep: text("next_step"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [uniqueIndex("idx_projects_identity").on(table.ownerId, table.normalizedName)],
+);
+
+/** Ownership is inherited through `projectId`; every read joins under `projects`. */
+export const projectParts = sqliteTable(
+  "project_parts",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id").notNull(),
+    name: text("name").notNull(),
+    normalizedName: text("normalized_name").notNull(),
+    model: text("model"),
+    modelKey: text("model_key").notNull().default("__unknown__"),
+    category: text("category").notNull(),
+    quantityRequired: integer("quantity_required").notNull().default(1),
+    matchMode: text("match_mode").notNull().default("identity"),
+    note: text("note"),
+    position: integer("position").notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (table) => [index("idx_project_parts_project").on(table.projectId, table.position)],
+);
+
+export const identificationRateLimits = sqliteTable(
+  "identification_rate_limits",
+  {
+    ownerId: ownerId(),
+    windowName: text("window_name").notNull(),
+    windowStart: integer("window_start").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+    count: integer("count").notNull().default(0),
+  },
+  (table) => [
+    primaryKey({ columns: [table.ownerId, table.windowName, table.windowStart] }),
+    index("idx_identification_rate_limits_expiry").on(table.expiresAt),
   ],
 );
