@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createInventoryResponseGuard } from "../lib/inventory/response-guard.ts";
+import { createInventoryResponseGuard } from "../../lib/inventory/response-guard.ts";
 
 function deferred() {
   let resolve;

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 async function render() {
@@ -12,6 +13,8 @@ async function render() {
     { waitUntil() {}, passThroughOnException() {} },
   );
 }
+
+const source = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
 test("server-renders the Parts Cabinet application", async () => {
   const response = await render();
@@ -31,11 +34,13 @@ test("leads the catalogue with camera identification", async () => {
   assert.match(html, /Identify with camera/);
   assert.match(html, /Identify &amp;? ?catalogue/);
   assert.doesNotMatch(html, /Add component/);
-  const pageSource = await import("node:fs/promises").then((fs) => fs.readFile(new URL("../app/page.tsx", import.meta.url), "utf8"));
-  assert.doesNotMatch(pageSource, /handleInventoryCreate|isAdding/);
-  assert.match(pageSource, /attach-photo-button/);
-  assert.match(pageSource, /part\.image \? <img/);
-  const workspaceSource = await import("node:fs/promises").then((fs) => fs.readFile(new URL("../app/components/IdentificationWorkspace.tsx", import.meta.url), "utf8"));
+
+  const inventorySource = await source("app/components/InventoryView.tsx");
+  assert.doesNotMatch(inventorySource, /handleInventoryCreate|isAdding/);
+  assert.match(inventorySource, /attach-photo-button/);
+  assert.match(inventorySource, /part\.hasImage \? <img src=\{partPhotoUrl\(part\)\}/);
+
+  const workspaceSource = await source("app/components/IdentificationWorkspace.tsx");
   assert.match(workspaceSource, /cropDetections/);
   assert.match(workspaceSource, /Add a part by hand instead/);
 });
@@ -43,21 +48,36 @@ test("leads the catalogue with camera identification", async () => {
 test("renders the persistent inventory and removal contracts", async () => {
   const html = await (await render()).text();
   assert.doesNotMatch(html, /Arduino Uno R3/);
-  const dialogSource = await import("node:fs/promises").then((fs) => fs.readFile(new URL("../app/components/RemoveInventoryDialog.tsx", import.meta.url), "utf8"));
+  const dialogSource = await source("app/components/RemoveInventoryDialog.tsx");
   assert.match(dialogSource, /Quantity to remove/);
   assert.match(dialogSource, /Confirm removal/);
   assert.match(dialogSource, /permanently deletes all/);
 });
 
 test("supports concurrent pending removals per component", async () => {
-  const pageSource = await import("node:fs/promises").then((fs) => fs.readFile(new URL("../app/page.tsx", import.meta.url), "utf8"));
-  assert.match(pageSource, /pendingRemovals/);
-  assert.match(pageSource, /pending\.item\.id === part\.id/);
-  assert.match(pageSource, /undoRemoval\(pending\.item\.id\)/);
-  assert.match(pageSource, /removal-toast-stack/);
-  assert.match(pageSource, /error\.item = payload\.item/);
-  assert.match(pageSource, /inventoryResponseGuard\.current\.recordMutation\(\)/);
-  assert.match(pageSource, /function applyIdentified[\s\S]*recordMutation\(\)[\s\S]*loadInventory\(\)/);
+  const inventorySource = await source("app/components/InventoryView.tsx");
+  assert.match(inventorySource, /pendingRemovals/);
+  assert.match(inventorySource, /pending\.item\.id === part\.id/);
+  assert.match(inventorySource, /undoRemoval\(pending\.item\.id\)/);
+  assert.match(inventorySource, /removal-toast-stack/);
+  assert.match(inventorySource, /responseGuard\.current\.recordMutation\(\)/);
+  // A conflicting write hands back the server's row so the card can resynchronise.
+  assert.match(inventorySource, /failure\.status === 409[\s\S]*replaceItem\(failure\.item\)/);
+  const clientSource = await source("lib/inventory/client.ts");
+  assert.match(clientSource, /class ApiError[\s\S]*item\?: InventoryItem/);
+});
+
+test("a confirmed scan reloads the catalogue from the server", async () => {
+  const pageSource = await source("app/page.tsx");
+  assert.match(pageSource, /onConfirmed=\{\(\) => setRefreshToken/);
+  assert.match(pageSource, /<InventoryView refreshToken=\{refreshToken\}/);
+});
+
+test("the list payload and the thumbnail endpoint stay separate", async () => {
+  const persistenceSource = await source("lib/inventory/persistence.ts");
+  // Selecting `image` here would put base64 back into every list response.
+  assert.doesNotMatch(persistenceSource, /const SELECT_COLUMNS =[^;]*,image[,"]/);
+  assert.match(persistenceSource, /\(image IS NOT NULL\) AS has_image/);
 });
 
 test("does not render the disposable starter preview", async () => {

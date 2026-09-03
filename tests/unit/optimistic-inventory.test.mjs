@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { projectInventoryWithPending } from "../lib/inventory/optimistic-inventory.ts";
+import { projectInventoryWithPending } from "../../lib/inventory/optimistic-inventory.ts";
 
 const item = { id: "part-1", name: "PIR Motion Sensor", model: null, category: "Sensors", quantity: 5, location: "Bin B3", code: "SNS-PIR", description: "Motion sensor", tags: ["Motion"] };
 

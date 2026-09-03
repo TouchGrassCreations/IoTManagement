@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { normalizeCategory, normalizeIdentity, validateConfirmationPayload, validateGeminiPayload } from "../lib/identification/validation.ts";
+import { normalizeCategory, normalizeIdentity, validateConfirmationPayload, validateGeminiPayload } from "../../lib/identification/validation.ts";
 
 const sample = {
   name: "PIR motion sensor", model: null, category: "Sensors", quantity: 2,

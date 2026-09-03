@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { handleIdentifyRequest } from "../app/api/identify/route.ts";
-import { handleConfirmRequest } from "../app/api/identify/confirm/route.ts";
-import { handleIdentifyTokenRequest } from "../app/api/identify/token/route.ts";
-import { recognizeComponents } from "../lib/identification/gemini.ts";
+import { handleIdentifyRequest } from "../../app/api/identify/route.ts";
+import { handleConfirmRequest } from "../../app/api/identify/confirm/route.ts";
+import { handleIdentifyTokenRequest } from "../../app/api/identify/token/route.ts";
+import { recognizeComponents } from "../../lib/identification/gemini.ts";
 
 const sample = { name: "HC-SR04 ultrasonic sensor", model: "HC-SR04", category: "Sensors", quantity: 1, boundingBox: { top: .1, left: .1, width: .3, height: .2 }, confidence: .93, visibleMarkings: ["HC-SR04"], alternatives: [], description: "Ultrasonic distance sensor", tags: ["distance", "5V"] };
 

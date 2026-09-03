@@ -1,8 +1,6 @@
-import {
-  InvalidRemovalQuantityError,
-  InventoryNotFoundError,
-  InventoryQuantityConflictError,
-} from "../../../../../lib/inventory/persistence.ts";
+import { domainErrorResponse, respond } from "../../../../../lib/http/respond.ts";
+import { routeContext } from "../../../../../lib/http/context.ts";
+import { InvalidRemovalQuantityError, InventoryQuantityConflictError } from "../../../../../lib/inventory/persistence.ts";
 import type { RemoveInventoryInput, RemoveInventoryResult } from "../../../../../lib/inventory/types.ts";
 
 type Dependencies = { remove: (input: RemoveInventoryInput) => Promise<RemoveInventoryResult> };
@@ -13,23 +11,28 @@ export async function handleInventoryRemoval(request: Request, id: string, deps:
     if (!body || typeof body !== "object") throw new InvalidRemovalQuantityError();
     const { quantity, expectedCurrentQuantity } = body as Record<string, unknown>;
     if (!Number.isInteger(quantity) || !Number.isInteger(expectedCurrentQuantity)) throw new InvalidRemovalQuantityError();
-    const result = await deps.remove({ id, quantity: quantity as number, expectedCurrentQuantity: expectedCurrentQuantity as number });
-    return Response.json(result);
+    return Response.json(
+      await deps.remove({ id, quantity: quantity as number, expectedCurrentQuantity: expectedCurrentQuantity as number }),
+    );
   } catch (error) {
-    if (error instanceof InventoryQuantityConflictError) return Response.json({ error: error.message, item: error.item }, { status: 409 });
-    if (error instanceof InventoryNotFoundError) return Response.json({ error: error.message }, { status: 404 });
-    if (error instanceof InvalidRemovalQuantityError || error instanceof SyntaxError) return Response.json({ error: error instanceof Error ? error.message : "Invalid request." }, { status: 400 });
+    const conflict = error instanceof InventoryQuantityConflictError ? { item: error.item } : undefined;
+    const mapped = domainErrorResponse(error, conflict);
+    if (mapped) return mapped;
+    if (error instanceof SyntaxError) return Response.json({ error: "Invalid request." }, { status: 400 });
     console.error("Inventory removal failed", error);
     return Response.json({ error: "The component could not be removed. Please retry." }, { status: 500 });
   }
 }
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> | { id: string } }): Promise<Response> {
-  const [{ env }, { removeInventoryQuantity }] = await Promise.all([
-    import("cloudflare:workers"),
-    import("../../../../../lib/inventory/persistence.ts"),
-  ]);
-  const bindings = env as unknown as { DB: import("../../../../../lib/identification/persistence.ts").D1Like };
-  const { id } = await context.params;
-  return handleInventoryRemoval(request, decodeURIComponent(id), { remove: (input) => removeInventoryQuantity(input, bindings.DB) });
+  return respond("Inventory removal", async () => {
+    const [{ ownerId, db }, { removeInventoryQuantity }] = await Promise.all([
+      routeContext(request),
+      import("../../../../../lib/inventory/persistence.ts"),
+    ]);
+    const { id } = await context.params;
+    return handleInventoryRemoval(request, decodeURIComponent(id), {
+      remove: (input) => removeInventoryQuantity(input, ownerId, db),
+    });
+  });
 }

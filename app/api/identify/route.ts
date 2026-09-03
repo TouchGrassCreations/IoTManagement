@@ -1,5 +1,7 @@
 import { recognizeComponents } from "../../../lib/identification/gemini.ts";
 import { issueConfirmationToken } from "../../../lib/identification/tokens.ts";
+import { respond } from "../../../lib/http/respond.ts";
+import { routeContext } from "../../../lib/http/context.ts";
 import type { Detection } from "../../../lib/identification/types.ts";
 
 type Dependencies = { recognize: (input: { bytes: Uint8Array; mimeType: string }) => Promise<Detection[]>; issueToken: () => Promise<string> };
@@ -27,11 +29,12 @@ export async function handleIdentifyRequest(request: Request, deps: Dependencies
   }
 }
 
-export async function POST(request: Request) {
-  const { env } = await import("cloudflare:workers");
-  const bindings = env as unknown as Record<string, string>;
-  return handleIdentifyRequest(request, {
-    recognize: (input) => recognizeComponents({ ...input, apiKey: bindings.GEMINI_API_KEY, model: bindings.GEMINI_MODEL }),
-    issueToken: () => issueConfirmationToken(bindings.CONFIRMATION_TOKEN_SECRET),
+export async function POST(request: Request): Promise<Response> {
+  return respond("Identification", async () => {
+    const { env } = await routeContext(request);
+    return handleIdentifyRequest(request, {
+      recognize: (input) => recognizeComponents({ ...input, apiKey: env.GEMINI_API_KEY, model: env.GEMINI_MODEL }),
+      issueToken: () => issueConfirmationToken(env.CONFIRMATION_TOKEN_SECRET),
+    });
   });
 }
