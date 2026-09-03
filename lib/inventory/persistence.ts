@@ -290,6 +290,15 @@ export async function updateInventoryItem(
 
     if (conflict) {
       const merged = conflict.quantity + quantity;
+      // A merge moves stock between two rows, so it must be all-or-nothing. The
+      // first statement only fires while BOTH rows still hold what was read; the
+      // rest only fire once it has, so a losing race leaves both rows untouched
+      // rather than deleting the source without crediting the target.
+      const sourceIntact = "EXISTS(SELECT 1 FROM inventory_parts WHERE id = ? AND owner_id = ? AND quantity = ?)";
+      const sourceBindings = [input.id, ownerId, current.quantity];
+      const targetMerged = "EXISTS(SELECT 1 FROM inventory_parts WHERE id = ? AND owner_id = ? AND quantity = ?)";
+      const targetBindings = [conflict.id, ownerId, merged];
+
       const results = await db.batch([
         db
           .prepare(
@@ -297,26 +306,34 @@ export async function updateInventoryItem(
                quantity = ?, name = ?, model = ?, category = ?, location = ?, code = ?, description = ?, tags = ?,
                image = COALESCE(image,(SELECT image FROM inventory_parts WHERE id = ? AND owner_id = ?)),
                updated_at = CURRENT_TIMESTAMP
-             WHERE id = ? AND owner_id = ? AND quantity = ?`,
+             WHERE id = ? AND owner_id = ? AND quantity = ? AND ${sourceIntact}`,
           )
           .bind(
             merged, next.name, next.model, next.category, next.location, partCode(next.model), next.description,
-            JSON.stringify(next.tags), input.id, ownerId, conflict.id, ownerId, conflict.quantity,
+            JSON.stringify(next.tags), input.id, ownerId, conflict.id, ownerId, conflict.quantity, ...sourceBindings,
           ),
         db
-          .prepare("UPDATE identification_events SET inventory_part_id = ? WHERE inventory_part_id = ? AND owner_id = ?")
-          .bind(conflict.id, input.id, ownerId),
+          .prepare(
+            `UPDATE identification_events SET inventory_part_id = ?
+             WHERE inventory_part_id = ? AND owner_id = ? AND ${targetMerged}`,
+          )
+          .bind(conflict.id, input.id, ownerId, ...targetBindings),
         db
-          .prepare("UPDATE inventory_adjustment_events SET inventory_part_id = ? WHERE inventory_part_id = ? AND owner_id = ?")
-          .bind(conflict.id, input.id, ownerId),
+          .prepare(
+            `UPDATE inventory_adjustment_events SET inventory_part_id = ?
+             WHERE inventory_part_id = ? AND owner_id = ? AND ${targetMerged}`,
+          )
+          .bind(conflict.id, input.id, ownerId, ...targetBindings),
         db
           .prepare(
             `INSERT INTO inventory_adjustment_events
                (id,owner_id,inventory_part_id,event_type,quantity_before,quantity_removed,quantity_after)
-             VALUES (?,?,?,'merged_into',?,0,?)`,
+             SELECT ?,?,?,'merged_into',?,0,? WHERE ${targetMerged}`,
           )
-          .bind(crypto.randomUUID(), ownerId, conflict.id, conflict.quantity, merged),
-        db.prepare(`DELETE FROM inventory_parts WHERE ${guard}`).bind(...guardBindings),
+          .bind(crypto.randomUUID(), ownerId, conflict.id, conflict.quantity, merged, ...targetBindings),
+        db
+          .prepare(`DELETE FROM inventory_parts WHERE ${guard} AND ${targetMerged}`)
+          .bind(...guardBindings, ...targetBindings),
       ]);
       if (!changed(results[0]) || !changed(results[4])) return throwLatestConflict(input.id, ownerId, db);
       return { item: itemFromRow(await requireRow(conflict.id, ownerId, db)), mergedFromId: input.id };

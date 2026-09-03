@@ -142,3 +142,27 @@ test("a rename never merges across an owner boundary", async () => {
   assert.equal(result.item.quantity, 1);
   assert.equal(db.prepare("SELECT quantity FROM inventory_parts WHERE owner_id = 'user-2'").get().quantity, 7);
 });
+
+test("a merge that loses a race leaves both rows intact rather than losing stock", async () => {
+  const { db, adapter } = createDatabase();
+  const target = insertPart(db, "user-1", { name: "ESP32-CAM", quantity: 2 });
+  const duplicate = insertPart(db, "user-1", { name: "esp 32 cam", quantity: 3 });
+
+  // Someone else buys one of the target part between the read and the write.
+  const racing = {
+    ...adapter,
+    batch: async (statements) => {
+      db.prepare("UPDATE inventory_parts SET quantity = 9 WHERE id = ?").run(target.id);
+      return adapter.batch(statements);
+    },
+  };
+
+  await assert.rejects(
+    updateInventoryItem({ id: duplicate.id, expectedCurrentQuantity: 3, name: "ESP32-CAM" }, "user-1", racing),
+    InventoryQuantityConflictError,
+  );
+
+  assert.equal(db.prepare("SELECT quantity FROM inventory_parts WHERE id = ?").get(duplicate.id).quantity, 3, "the source survives");
+  assert.equal(db.prepare("SELECT quantity FROM inventory_parts WHERE id = ?").get(target.id).quantity, 9, "the target keeps the racing value");
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM inventory_adjustment_events").get().count, 0, "no half-finished merge is recorded");
+});
