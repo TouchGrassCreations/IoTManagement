@@ -6,7 +6,7 @@ import type { InventoryItem, SetInventoryImageInput } from "../../../../../lib/i
 type ReadDependencies = { readImage: () => Promise<{ image: string | null; updatedAt: string }> };
 type WriteDependencies = { setImage: (input: SetInventoryImageInput) => Promise<InventoryItem> };
 
-function bytesFromDataUrl(dataUrl: string): { bytes: Uint8Array; contentType: string } {
+function bytesFromDataUrl(dataUrl: string): { bytes: Uint8Array<ArrayBuffer>; contentType: string } {
   const [header, payload = ""] = dataUrl.split(",");
   const contentType = header.slice("data:".length).replace(";base64", "") || "application/octet-stream";
   const binary = atob(payload);

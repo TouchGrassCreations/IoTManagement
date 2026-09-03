@@ -30,6 +30,9 @@ npm run dev
 | `GEMINI_MODEL` | no | Defaults to `gemini-3.1-flash-lite`. |
 | `CONFIRMATION_TOKEN_SECRET` | yes | At least 16 characters. Signs the token that makes a confirmed scan idempotent. |
 | `ANONYMOUS_OWNER_ID` | no | Owner used when no signed-in identity is present. See below. |
+| `IDENTIFY_RATE_LIMIT_PER_MINUTE` | no | Identification budget per owner. Defaults to 10. |
+| `IDENTIFY_RATE_LIMIT_PER_HOUR` | no | Defaults to 60. |
+| `IDENTIFY_RATE_LIMIT_PER_DAY` | no | Defaults to 200. |
 
 Apply the migrations in `drizzle/` to the D1 database, in order, before
 confirming a scan.
@@ -102,6 +105,11 @@ The prototype accepts images up to 10 MiB and sends them to the Gemini API for
 processing; review Google's data-use terms before enabling uploads for other
 people.
 
+Identification costs money on every call, so each owner has a per-minute,
+per-hour and per-day budget counted in D1. The budget is charged before the
+upload is read, so a refused request costs neither bandwidth nor a Gemini call,
+and the `429` carries a `Retry-After`.
+
 ## Working with the cabinet
 
 - **Search, filter and sort** run in SQL behind covering indexes. The list pages
@@ -133,10 +141,14 @@ The matching key is `normalized_name + model_key`. A part with no model uses
 
 - `npm run dev` — start local development
 - `npm run build` — verify the build output
+- `npm run typecheck` — `tsc --noEmit`; the build strips types without checking them
 - `npm run test:unit` — unit and persistence tests (real SQL against SQLite)
 - `npm test` — build, then server-render the app and assert on the HTML
 - `npm run lint` — eslint
 - `npm run db:generate` — regenerate Drizzle migrations after a schema change
+
+Continuous integration runs lint, typecheck, unit tests and the build on every
+pull request.
 
 ## Design docs
 
