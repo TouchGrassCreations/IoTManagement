@@ -11,20 +11,29 @@ export type InventoryImportSummary = { imported: number; created: number; merged
 
 type Dependencies = { apply: (rows: InventoryImportRow[]) => Promise<InventoryImportSummary> };
 
-async function countParts(ownerId: string, db: D1Like): Promise<number> {
-  const row = await db
-    .prepare("SELECT COUNT(*) AS parts FROM inventory_parts WHERE owner_id = ?")
+type ExistingRow = { id: string; normalized_name: string; model_key: string; quantity: number };
+
+const identityOf = (row: { normalizedName: string; modelKey: string }) => `${row.normalizedName}\u0000${row.modelKey}`;
+
+/** The owner's current identities, so each row knows whether it lands on one. */
+async function existingByIdentity(ownerId: string, db: D1Like): Promise<Map<string, ExistingRow>> {
+  const rows = await db
+    .prepare("SELECT id, normalized_name, model_key, quantity FROM inventory_parts WHERE owner_id = ?")
     .bind(ownerId)
-    .first<{ parts: number }>();
-  return row?.parts ?? 0;
+    .all<ExistingRow>();
+  return new Map(rows.results.map((row) => [`${row.normalized_name}\u0000${row.model_key}`, row]));
 }
 
 /**
  * Upserts on `(owner_id, normalized_name, model_key)` — the identity the
- * catalogue already merges on — so re-importing a part adds its stock to the
- * row that is already there instead of creating a second one. Blank optional
- * cells leave what is stored alone; a sparse hand-written file must not wipe a
- * description or a bin.
+ * catalogue already merges on — so a re-import updates the row that is already
+ * there instead of creating a second one. Blank optional cells leave what is
+ * stored alone; a sparse hand-written file must not wipe a description or a bin.
+ *
+ * Quantity is SET to the file's value, not added to it. Import exists to restore
+ * what export produced, and an additive import doubles the cabinet every time
+ * the same backup is applied. Restoring twice must leave the same stock as
+ * restoring once.
  */
 export async function applyInventoryImport(
   rows: InventoryImportRow[],
@@ -33,52 +42,64 @@ export async function applyInventoryImport(
 ): Promise<InventoryImportSummary> {
   if (rows.length === 0) return { imported: 0, created: 0, merged: 0 };
 
-  const before = await countParts(ownerId, db);
-  const statements = rows.flatMap((row) => [
-    db
-      .prepare(
-        `INSERT INTO inventory_parts
-           (id,owner_id,name,normalized_name,model,model_key,category,quantity,location,code,description,tags)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-         ON CONFLICT(owner_id,normalized_name,model_key) DO UPDATE SET
-           quantity = quantity + excluded.quantity,
-           name = excluded.name,
-           category = excluded.category,
-           location = COALESCE(NULLIF(excluded.location,'Unsorted'),inventory_parts.location),
-           code = COALESCE(NULLIF(excluded.code,'MODEL-UNKNOWN'),inventory_parts.code),
-           description = COALESCE(NULLIF(excluded.description,''),inventory_parts.description),
-           tags = CASE WHEN excluded.tags = '[]' THEN inventory_parts.tags ELSE excluded.tags END,
-           updated_at = CURRENT_TIMESTAMP`,
-      )
-      .bind(
-        crypto.randomUUID(),
-        ownerId,
-        row.name,
-        row.normalizedName,
-        row.model,
-        row.modelKey,
-        row.category,
-        row.quantity,
-        row.location,
-        partCode(row.model),
-        row.description,
-        JSON.stringify(row.tags),
-      ),
-    // Reading the stock back inside the same batch keeps the audit trail exact:
-    // the row's quantity is post-import, so subtracting what arrived gives the
-    // level it was at beforehand without a second read that could race.
-    db
-      .prepare(
-        `INSERT INTO inventory_adjustment_events
-           (id,owner_id,inventory_part_id,event_type,quantity_before,quantity_removed,quantity_after)
-         SELECT ?,?,id,'csv_imported',quantity - ?,0,quantity
-         FROM inventory_parts WHERE owner_id = ? AND normalized_name = ? AND model_key = ?`,
-      )
-      .bind(crypto.randomUUID(), ownerId, row.quantity, ownerId, row.normalizedName, row.modelKey),
-  ]);
+  // Read before writing, so each audit event records the level the row actually
+  // sat at rather than one derived from the value that just overwrote it.
+  const existing = await existingByIdentity(ownerId, db);
+  let created = 0;
+
+  const statements = rows.flatMap((row) => {
+    const match = existing.get(identityOf(row));
+    const partId = match?.id ?? crypto.randomUUID();
+    if (!match) created += 1;
+
+    return [
+      db
+        .prepare(
+          `INSERT INTO inventory_parts
+             (id,owner_id,name,normalized_name,model,model_key,category,quantity,location,code,description,tags)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+           ON CONFLICT(owner_id,normalized_name,model_key) DO UPDATE SET
+             quantity = excluded.quantity,
+             name = excluded.name,
+             category = excluded.category,
+             location = COALESCE(NULLIF(excluded.location,'Unsorted'),inventory_parts.location),
+             code = COALESCE(NULLIF(excluded.code,'MODEL-UNKNOWN'),inventory_parts.code),
+             description = COALESCE(NULLIF(excluded.description,''),inventory_parts.description),
+             tags = CASE WHEN excluded.tags = '[]' THEN inventory_parts.tags ELSE excluded.tags END,
+             updated_at = CURRENT_TIMESTAMP`,
+        )
+        .bind(
+          partId,
+          ownerId,
+          row.name,
+          row.normalizedName,
+          row.model,
+          row.modelKey,
+          row.category,
+          row.quantity,
+          row.location,
+          partCode(row.model),
+          row.description,
+          JSON.stringify(row.tags),
+        ),
+      db
+        .prepare(
+          `INSERT INTO inventory_adjustment_events
+             (id,owner_id,inventory_part_id,event_type,quantity_before,quantity_removed,quantity_after)
+           VALUES (?,?,?,'csv_imported',?,?,?)`,
+        )
+        .bind(
+          crypto.randomUUID(),
+          ownerId,
+          partId,
+          match?.quantity ?? 0,
+          Math.max(0, (match?.quantity ?? 0) - row.quantity),
+          row.quantity,
+        ),
+    ];
+  });
 
   await db.batch(statements);
-  const created = Math.max(0, Math.min(rows.length, (await countParts(ownerId, db)) - before));
   return { imported: rows.length, created, merged: rows.length - created };
 }
 

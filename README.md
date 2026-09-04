@@ -119,17 +119,20 @@ and the `429` carries a `Retry-After`.
   category, bin, description, tags — and adjusts stock you bought or used.
   Renaming a part onto an identity you already hold folds the two rows into one
   and adds their stock together, moving history onto the survivor, rather than
-  refusing the edit and leaving you with a duplicate.
+  refusing the edit and leaving you with a duplicate. Only fields you actually
+  edited cross over, so a rename never moves the surviving part to a different
+  bin.
 - **Removal** is undoable for ten seconds, and several removals can be pending
   at once. Removing the last unit deletes the part and its history.
 - **Datasheets** are one click from a part card. The link is a search on the
   confirmed model, falling back to the part name — a guessed vendor URL built
   from a model number 404s as often as it resolves.
 - **CSV export and import** give the data somewhere to live besides D1. Import
-  upserts on the same identity the catalogue merges on, so re-importing adds
-  stock to the row already there rather than creating a duplicate. A file with
-  one unreadable row imports nothing and reports every problem against the row
-  it came from.
+  upserts on the same identity the catalogue merges on, so a restore updates the
+  row already there rather than creating a duplicate, and sets each quantity to
+  the file's value — restoring the same backup twice leaves the same stock as
+  restoring it once. A file with one unreadable row imports nothing and reports
+  every problem against the row it came from.
 
 ## Projects
 

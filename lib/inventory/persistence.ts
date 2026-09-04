@@ -284,12 +284,22 @@ export async function updateInventoryItem(
 
   if (identityChanged) {
     const conflict = await db
-      .prepare("SELECT id, quantity FROM inventory_parts WHERE owner_id = ? AND normalized_name = ? AND model_key = ? AND id <> ?")
+      .prepare(`SELECT ${SELECT_COLUMNS} FROM inventory_parts WHERE owner_id = ? AND normalized_name = ? AND model_key = ? AND id <> ?`)
       .bind(ownerId, normalizedName, modelKey, input.id)
-      .first<{ id: string; quantity: number }>();
+      .first<InventoryRow>();
 
     if (conflict) {
-      const merged = conflict.quantity + quantity;
+      const survivor = itemFromRow(conflict);
+      const merged = survivor.quantity + quantity;
+      // Only fields the caller actually edited cross over. Carrying the whole
+      // `next` object would move the survivor to the disappearing row's bin and
+      // overwrite its description, which a rename never asked for.
+      const kept = {
+        category: input.category ?? survivor.category,
+        location: input.location ?? survivor.location,
+        description: input.description ?? survivor.description,
+        tags: input.tags ?? survivor.tags,
+      };
       // A merge moves stock between two rows, so it must be all-or-nothing. The
       // first statement only fires while BOTH rows still hold what was read; the
       // rest only fire once it has, so a losing race leaves both rows untouched
@@ -309,8 +319,8 @@ export async function updateInventoryItem(
              WHERE id = ? AND owner_id = ? AND quantity = ? AND ${sourceIntact}`,
           )
           .bind(
-            merged, next.name, next.model, next.category, next.location, partCode(next.model), next.description,
-            JSON.stringify(next.tags), input.id, ownerId, conflict.id, ownerId, conflict.quantity, ...sourceBindings,
+            merged, next.name, next.model, kept.category, kept.location, partCode(next.model), kept.description,
+            JSON.stringify(kept.tags), input.id, ownerId, conflict.id, ownerId, survivor.quantity, ...sourceBindings,
           ),
         db
           .prepare(
@@ -330,7 +340,7 @@ export async function updateInventoryItem(
                (id,owner_id,inventory_part_id,event_type,quantity_before,quantity_removed,quantity_after)
              SELECT ?,?,?,'merged_into',?,0,? WHERE ${targetMerged}`,
           )
-          .bind(crypto.randomUUID(), ownerId, conflict.id, conflict.quantity, merged, ...targetBindings),
+          .bind(crypto.randomUUID(), ownerId, conflict.id, survivor.quantity, merged, ...targetBindings),
         db
           .prepare(`DELETE FROM inventory_parts WHERE ${guard} AND ${targetMerged}`)
           .bind(...guardBindings, ...targetBindings),

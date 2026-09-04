@@ -166,3 +166,35 @@ test("a merge that loses a race leaves both rows intact rather than losing stock
   assert.equal(db.prepare("SELECT quantity FROM inventory_parts WHERE id = ?").get(target.id).quantity, 9, "the target keeps the racing value");
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM inventory_adjustment_events").get().count, 0, "no half-finished merge is recorded");
 });
+
+test("a merge keeps the survivor's bin and details when the rename did not touch them", async () => {
+  const { db, adapter } = createDatabase();
+  const target = insertPart(db, "user-1", {
+    name: "HC-SR04", quantity: 8, location: "Bin B9", description: "Ultrasonic ranger", tags: '["Distance"]',
+  });
+  const duplicate = insertPart(db, "user-1", {
+    name: "hc sr04", quantity: 4, location: "Bin Z9", description: "dupe", tags: '["Junk"]',
+  });
+
+  await updateInventoryItem({ id: duplicate.id, expectedCurrentQuantity: 4, name: "HC-SR04" }, "user-1", adapter);
+
+  const row = db.prepare("SELECT quantity, location, description, tags FROM inventory_parts WHERE id = ?").get(target.id);
+  assert.equal(row.quantity, 12, "stock still adds up");
+  assert.equal(row.location, "Bin B9", "the survivor is not moved to the disappearing row's bin");
+  assert.equal(row.description, "Ultrasonic ranger");
+  assert.deepEqual(JSON.parse(row.tags), ["Distance"]);
+});
+
+test("a merge still applies fields the rename did edit", async () => {
+  const { db, adapter } = createDatabase();
+  const target = insertPart(db, "user-1", { name: "Relay", quantity: 1, location: "Bin B9" });
+  const duplicate = insertPart(db, "user-1", { name: "relay module", quantity: 1, location: "Bin Z9" });
+
+  await updateInventoryItem(
+    { id: duplicate.id, expectedCurrentQuantity: 1, name: "Relay", location: "Bin C3" },
+    "user-1",
+    adapter,
+  );
+
+  assert.equal(db.prepare("SELECT location FROM inventory_parts WHERE id = ?").get(target.id).location, "Bin C3");
+});

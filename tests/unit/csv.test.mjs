@@ -13,6 +13,8 @@ import {
 import { handleInventoryExport } from "../../app/api/inventory/export/route.ts";
 import { applyInventoryImport, handleInventoryImport } from "../../app/api/inventory/import/route.ts";
 import { createDatabase, insertPart } from "../helpers/sqlite-d1.mjs";
+import { listInventory } from "../../lib/inventory/persistence.ts";
+import { parseInventoryQuery } from "../../lib/inventory/query.ts";
 
 const item = (overrides = {}) => ({
   id: "part-1",
@@ -164,7 +166,7 @@ test("a readable file is applied and summarised", async () => {
   assert.deepEqual(await response.json(), { imported: 1, created: 1, merged: 0 });
 });
 
-test("an import merges into the part already holding the identity, and only for that owner", async () => {
+test("an import updates the part already holding the identity, and only for that owner", async () => {
   const { db, adapter } = createDatabase();
   insertPart(db, "owner-1", { name: "PIR Motion Sensor", quantity: 2, description: "Passive infrared." });
   insertPart(db, "owner-2", { name: "PIR Motion Sensor", quantity: 9 });
@@ -177,12 +179,13 @@ test("an import merges into the part already holding the identity, and only for 
   assert.deepEqual(summary, { imported: 2, created: 1, merged: 1 });
 
   const mine = db
-    .prepare("SELECT name,quantity,location,description,model_key FROM inventory_parts WHERE owner_id = ? ORDER BY quantity")
+    .prepare("SELECT name,quantity,location,description,model_key FROM inventory_parts WHERE owner_id = ? ORDER BY name")
     .all("owner-1");
   assert.equal(mine.length, 2);
   assert.deepEqual({ ...mine[0] }, { name: "BME280", quantity: 4, location: "Bin B7", description: "Pressure sensor", model_key: "__unknown__" });
   // Blank cells leave the stored bin and description alone.
-  assert.equal(mine[1].quantity, 5);
+  // Quantity is set from the file, not added to what was there.
+  assert.equal(mine[1].quantity, 3);
   assert.equal(mine[1].location, "Unsorted");
   assert.equal(mine[1].description, "Passive infrared.");
 
@@ -201,7 +204,7 @@ test("an import leaves an audit trail with the stock levels it moved", async () 
     .all("owner-1");
   assert.deepEqual(events.map((row) => ({ ...row })), [
     { event_type: "csv_imported", quantity_before: 0, quantity_after: 2 },
-    { event_type: "csv_imported", quantity_before: 4, quantity_after: 10 },
+    { event_type: "csv_imported", quantity_before: 4, quantity_after: 6 },
   ]);
 });
 
@@ -228,4 +231,39 @@ test("a multi-byte body is measured in bytes, not characters", async () => {
   );
   assert.equal(response.status, 400);
   assert.match((await response.json()).error, /too large/);
+});
+
+test("restoring the same export twice leaves the same stock as restoring once", async () => {
+  const { db, adapter } = createDatabase();
+  insertPart(db, "user-1", { name: "Jumper wires", quantity: 40, category: "Wiring & Connectors" });
+  insertPart(db, "user-1", { name: "Arduino Uno R3", quantity: 2, category: "Microcontrollers & Compute" });
+
+  const page = await listInventory("user-1", parseInventoryQuery(new URL("http://test/api/inventory")), adapter);
+  const backup = inventoryToCsv(page.items);
+  const restore = async () => applyInventoryImport(parseInventoryCsv(backup).rows, "user-1", adapter);
+
+  await restore();
+  const afterOnce = db.prepare("SELECT IFNULL(SUM(quantity),0) AS units FROM inventory_parts WHERE owner_id = 'user-1'").get().units;
+  await restore();
+  const afterTwice = db.prepare("SELECT IFNULL(SUM(quantity),0) AS units FROM inventory_parts WHERE owner_id = 'user-1'").get().units;
+
+  assert.equal(afterOnce, 42, "a restore reproduces the cabinet it came from");
+  assert.equal(afterTwice, afterOnce, "a second restore is a no-op, not a doubling");
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM inventory_parts WHERE owner_id = 'user-1'").get().c, 2);
+});
+
+test("an import records the stock level the row was actually at", async () => {
+  const { db, adapter } = createDatabase();
+  insertPart(db, "user-1", { name: "Relay", quantity: 7, category: "Sensors" });
+
+  await applyInventoryImport(
+    parseInventoryCsv("name,category,quantity\nRelay,Sensors,3\n").rows,
+    "user-1",
+    adapter,
+  );
+
+  const event = db.prepare("SELECT * FROM inventory_adjustment_events WHERE event_type = 'csv_imported'").get();
+  assert.equal(event.quantity_before, 7);
+  assert.equal(event.quantity_after, 3);
+  assert.equal(db.prepare("SELECT quantity FROM inventory_parts WHERE owner_id='user-1'").get().quantity, 3);
 });
