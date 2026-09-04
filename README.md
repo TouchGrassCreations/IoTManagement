@@ -143,9 +143,11 @@ are scanned, edited or removed.
 
 Requirements match either on identity — the same `normalized_name + model_key`
 the catalogue merges on — or on category alone, which covers "20 × any jumper
-wire". Readiness is `sum(owned units) / sum(required units)`; it answers "how
-much of the shopping list is done", while the separate ready flag answers "can I
-start". Five starter templates seed a new cabinet so the tab is not empty.
+wire". Readiness weighs every requirement equally rather than counting units, so
+a pile of jumper wires cannot make a build look nearly done while the board it
+needs is missing; progress inside a single requirement still counts
+proportionally. The separate ready flag answers "can I start". Five starter
+templates seed a new cabinet so the tab is not empty.
 
 ## History
 

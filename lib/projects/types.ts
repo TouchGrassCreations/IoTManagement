@@ -79,8 +79,12 @@ export type RequirementMatch = {
 };
 
 export type ProjectReadiness = {
+  /** How many distinct requirements the build declares, and how many are met. */
+  requiredParts: number;
+  satisfiedParts: number;
   requiredUnits: number;
   ownedUnits: number;
+  /** Requirement-weighted: see `readinessOf`. */
   percent: number;
   ready: boolean;
 };

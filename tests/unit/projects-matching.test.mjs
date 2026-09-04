@@ -89,24 +89,38 @@ test("category mode is satisfied by any part filed in that category", () => {
   assert.equal(match.missing, 3);
 });
 
-test("readiness weighs units, not the number of requirements", () => {
+test("a pile of cheap parts does not outweigh the part the build turns on", () => {
   const wires = requirement({ name: "Jumper wire", category: "Wiring & Connectors", quantityRequired: 10 });
   const board = requirement({ name: "Arduino Uno R3", category: "Microcontrollers & Compute", quantityRequired: 1 });
 
   const withWires = readinessOf(matchRequirements([wires, board], [stock({ name: "jumper wire", category: "Wiring & Connectors", quantity: 10 })]));
   const withBoard = readinessOf(matchRequirements([wires, board], [stock({ name: "arduino uno r3", category: "Microcontrollers & Compute", quantity: 1 })]));
 
-  assert.equal(withWires.percent, 90, "ten of eleven units, not half the requirements");
-  assert.equal(withBoard.percent, 9, "the board alone is one unit of eleven, not half the build");
+  // Counting units read these as 90% and 9%; each requirement is one share.
+  assert.equal(withWires.percent, 50, "all the wires is half the build, not nearly all of it");
+  assert.equal(withBoard.percent, 50, "the board is worth as much as the whole pile of wires");
   assert.equal(withWires.ready, false);
   assert.equal(withBoard.ready, false);
+});
+
+test("progress inside one requirement still moves the bar", () => {
+  const wires = requirement({ name: "Jumper wire", category: "Wiring & Connectors", quantityRequired: 10 });
+  const board = requirement({ name: "Arduino Uno R3", category: "Microcontrollers & Compute", quantityRequired: 1 });
+  const inventory = [stock({ name: "jumper wire", category: "Wiring & Connectors", quantity: 5 })];
+
+  const half = readinessOf(matchRequirements([wires, board], inventory));
+  assert.equal(half.percent, 25, "half of one of two requirements");
+  assert.equal(half.satisfiedParts, 0);
+  assert.equal(half.requiredParts, 2);
 });
 
 test("a project is ready only when every unit is present", () => {
   const need = requirement({ name: "DHT22", quantityRequired: 2 });
   const complete = readinessOf(matchRequirements([need], [stock({ name: "dht22", quantity: 2 })]));
 
-  assert.deepEqual(complete, { requiredUnits: 2, ownedUnits: 2, percent: 100, ready: true });
+  assert.deepEqual(complete, {
+    requiredParts: 1, satisfiedParts: 1, requiredUnits: 2, ownedUnits: 2, percent: 100, ready: true,
+  });
 });
 
 test("one missing unit out of two hundred never rounds up to complete", () => {
@@ -118,7 +132,9 @@ test("one missing unit out of two hundred never rounds up to complete", () => {
 });
 
 test("a project with no requirements is empty, not finished", () => {
-  assert.deepEqual(readinessOf([]), { requiredUnits: 0, ownedUnits: 0, percent: 0, ready: false });
+  assert.deepEqual(readinessOf([]), {
+    requiredParts: 0, satisfiedParts: 0, requiredUnits: 0, ownedUnits: 0, percent: 0, ready: false,
+  });
 });
 
 test("projects rank by readiness, then by how little is left to buy", () => {

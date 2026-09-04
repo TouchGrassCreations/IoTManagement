@@ -51,7 +51,10 @@ test("a created project reads back with its requirements in order and readiness 
 
   assert.deepEqual(created.requirements.map((match) => match.requirement.name), ["DHT22", "Arduino Uno R3", "OLED Display"]);
   assert.deepEqual(created.requirements.map((match) => match.owned), [2, 1, 0]);
-  assert.deepEqual(created.readiness, { requiredUnits: 4, ownedUnits: 3, percent: 75, ready: false });
+  // Two of three requirements met; the OLED costs a full third regardless of quantity.
+  assert.deepEqual(created.readiness, {
+    requiredParts: 3, satisfiedParts: 2, requiredUnits: 4, ownedUnits: 3, percent: 66, ready: false,
+  });
 
   const reread = await getProjectPlan(created.id, "user-1", adapter);
   assert.deepEqual(reread.readiness, created.readiness);

@@ -150,16 +150,22 @@ For each requirement:
 Per requirement the planner reports `required`, `owned` (capped at `required`,
 so surplus stock cannot mask a different shortfall), and `missing`.
 
-Project readiness is `sum(owned units) / sum(required units)`, floored — so 199
-of 200 screws reads 99%, never 100%. This is a bill-of-materials progress bar,
-and it has a known bias: a build needing 20 jumper wires and one ESP32-CAM reads
-95% while holding only the wires, even though nothing can be assembled. The
-percentage answers "how much of the shopping list is done", not "can I start".
+Project readiness weighs every requirement equally, whatever quantity it asks
+for: each contributes one share, filled proportionally by what is owned. So the
+percentage is `sum(min(owned/required, 1)) / requirement count`, floored — 199
+of 200 screws reads 99%, never 100%.
 
-"Can I start" is the separate `ready` flag, true only when every requirement is
-fully met. The UI leads with the missing list and ranks by percentage then by
-smallest remaining shortfall, so the blocking parts stay visible rather than
-being hidden behind a reassuring number.
+Weighing units instead would let bulk items drown out the parts a build turns
+on: 20 jumper wires and one ESP32-CAM would read 95% ready while nothing could
+be assembled. Under requirement weighting that is 50%, and the board counts for
+as much as the whole pile of wires. Credit stays proportional *inside* a
+requirement, because the distortion was between requirements, not within one —
+half the wires should still move the bar.
+
+"Can I start" remains the separate `ready` flag, true only when every
+requirement is fully met. The card reads "3 / 6 parts ready" against the same
+requirement count the percentage uses, and ranking breaks ties on distinct parts
+still short, so the blocking parts stay visible.
 
 A project with no requirements is 0% ready, not 100%. An empty project is not a
 finished one.
