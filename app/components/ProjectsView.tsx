@@ -185,7 +185,7 @@ export default function ProjectsView() {
               <div className="project-content">
                 <div className="project-meta">
                   <span>{STATE_LABELS[project.state]}</span>
-                  <small>{project.readiness.ownedUnits} / {project.readiness.requiredUnits} parts ready</small>
+                  <small>{project.readiness.satisfiedParts} / {project.readiness.requiredParts} parts ready</small>
                 </div>
                 <h2>{project.name}</h2>
                 <div className="progress"><i style={{ width: `${project.readiness.percent}%` }} /></div>
@@ -198,7 +198,7 @@ export default function ProjectsView() {
                   </div>
                 ) : (
                   <p className="ready-note">
-                    {project.readiness.requiredUnits === 0
+                    {project.readiness.requiredParts === 0
                       ? "No parts listed yet — add what this build needs."
                       : "Every part is in the cabinet."}
                   </p>

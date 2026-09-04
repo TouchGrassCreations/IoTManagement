@@ -19,7 +19,7 @@ const plan = {
   createdAt: "2026-01-01 00:00:00",
   updatedAt: "2026-01-01 00:00:00",
   requirements: [],
-  readiness: { requiredUnits: 0, ownedUnits: 0, percent: 0, ready: false },
+  readiness: { requiredParts: 0, satisfiedParts: 0, requiredUnits: 0, ownedUnits: 0, percent: 0, ready: false },
 };
 
 const body = (payload, method = "POST") =>

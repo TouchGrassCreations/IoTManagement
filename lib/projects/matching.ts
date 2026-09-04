@@ -66,19 +66,34 @@ export function matchRequirements(
 }
 
 /**
- * Units, not requirements: a build needing ten wires and one board is not 90%
- * ready on the wires alone. The percentage is floored so an all-but-one-part
- * project never reads 100%, and a project that declares nothing is 0% — an
- * empty project is not a finished one.
+ * Every requirement weighs the same, whatever quantity it asks for. Counting
+ * units instead let bulk items drown out the parts a build actually turns on:
+ * twenty jumper wires and no ESP32-CAM read 95% ready while nothing could be
+ * assembled. One requirement is one share of the build.
+ *
+ * Within a requirement the credit is proportional, so half the wires still
+ * moves the bar — the distortion was the weighting between requirements, not
+ * partial progress inside one.
+ *
+ * The percentage is floored so an all-but-one-part project never reads 100%,
+ * and a project that declares nothing is 0% — an empty project is not a
+ * finished one.
  */
 export function readinessOf(matches: RequirementMatch[]): ProjectReadiness {
+  const requiredParts = matches.length;
+  const satisfiedParts = matches.filter((match) => match.missing === 0).length;
   const requiredUnits = matches.reduce((total, match) => total + match.required, 0);
   const ownedUnits = matches.reduce((total, match) => total + match.owned, 0);
+  // A requirement asking for nothing is trivially met rather than a divide by zero.
+  const shares = matches.reduce((total, match) => total + (match.required <= 0 ? 1 : match.owned / match.required), 0);
+
   return {
+    requiredParts,
+    satisfiedParts,
     requiredUnits,
     ownedUnits,
-    percent: requiredUnits === 0 ? 0 : Math.floor((ownedUnits / requiredUnits) * 100),
-    ready: requiredUnits > 0 && ownedUnits === requiredUnits,
+    percent: requiredParts === 0 ? 0 : Math.floor((shares / requiredParts) * 100),
+    ready: requiredParts > 0 && satisfiedParts === requiredParts,
   };
 }
 
@@ -91,14 +106,17 @@ export function planProject(
   return { ...project, requirements: matches, readiness: readinessOf(matches) };
 }
 
-const shortfall = (plan: ProjectPlan) => plan.readiness.requiredUnits - plan.readiness.ownedUnits;
+/** Distinct parts still short — the count that decides what to buy next. */
+const partsShort = (plan: ProjectPlan) => plan.readiness.requiredParts - plan.readiness.satisfiedParts;
+const unitsShort = (plan: ProjectPlan) => plan.readiness.requiredUnits - plan.readiness.ownedUnits;
 
 /** Buildable-now first: the answer to "what can I start this afternoon?". */
 export function rankProjects(plans: ProjectPlan[]): ProjectPlan[] {
   return [...plans].sort(
     (a, b) =>
       b.readiness.percent - a.readiness.percent ||
-      shortfall(a) - shortfall(b) ||
+      partsShort(a) - partsShort(b) ||
+      unitsShort(a) - unitsShort(b) ||
       a.name.localeCompare(b.name),
   );
 }
