@@ -147,11 +147,19 @@ For each requirement:
 - **`category` mode** matches any inventory row in the requirement's category, and
   sums their quantities. This covers "3 × any micro servo".
 
-Per requirement the planner reports `required`, `owned` (capped at `required`),
-and `missing`. Project readiness is the sum of owned units over the sum of
-required units, so a project needing 10 jumper wires and 1 board is not reported
-90% ready when only the wires are present — units are weighted by count, which
-matches how a build actually stalls.
+Per requirement the planner reports `required`, `owned` (capped at `required`,
+so surplus stock cannot mask a different shortfall), and `missing`.
+
+Project readiness is `sum(owned units) / sum(required units)`, floored — so 199
+of 200 screws reads 99%, never 100%. This is a bill-of-materials progress bar,
+and it has a known bias: a build needing 20 jumper wires and one ESP32-CAM reads
+95% while holding only the wires, even though nothing can be assembled. The
+percentage answers "how much of the shopping list is done", not "can I start".
+
+"Can I start" is the separate `ready` flag, true only when every requirement is
+fully met. The UI leads with the missing list and ranks by percentage then by
+smallest remaining shortfall, so the blocking parts stay visible rather than
+being hidden behind a reassuring number.
 
 A project with no requirements is 0% ready, not 100%. An empty project is not a
 finished one.

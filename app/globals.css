@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./projects.css";
 
 :root { --ink:#17211b; --muted:#667068; --paper:#f5f3ed; --card:#fffef9; --green:#276448; --lime:#ddec82; --line:#dcded5; }
 * { box-sizing:border-box; }

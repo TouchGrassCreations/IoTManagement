@@ -61,8 +61,7 @@ The brief was to build all of it, aiming for a system that scales.
 
 ### Inventory
 
-- `drizzle/0005_inventory_query_indexes.sql` — covering indexes for the list
-  query and its sorts.
+- Covering indexes for the list query and its sorts, folded into `0004`.
 - `lib/inventory/query.ts` — search/filter/sort/cursor parsing and SQL building.
 - `app/api/inventory/[id]/photo/route.ts` — gains `GET` serving raw bytes with
   ETag; `POST` unchanged apart from owner scoping.
@@ -71,7 +70,7 @@ The brief was to build all of it, aiming for a system that scales.
 
 ### Projects
 
-- `drizzle/0006_project_planner.sql` — `projects`, `project_parts`, indexes.
+- `drizzle/0005_project_planner.sql` — `projects`, `project_parts`, indexes.
 - `lib/projects/{types,matching,persistence,templates,validation}.ts`
 - `app/api/projects/**` — the endpoint table from the design doc.
 - `app/components/ProjectsView.tsx`, `ProjectEditor.tsx` — the real UI.
@@ -79,7 +78,7 @@ The brief was to build all of it, aiming for a system that scales.
 ### Surrounding work
 
 - `.github/workflows/ci.yml` — lint, unit tests, build on PRs.
-- `lib/identification/rate-limit.ts` + `drizzle/0007_rate_limits.sql`
+- `lib/identification/rate-limit.ts` + `drizzle/0006_rate_limits.sql`
 - `lib/inventory/csv.ts` — export and import.
 - `app/api/history/route.ts` + `HistoryView.tsx` over the existing audit tables.
 - `lib/parts/datasheet.ts` — datasheet search links from a confirmed model.
@@ -96,7 +95,7 @@ The brief was to build all of it, aiming for a system that scales.
 
 ## Migration notes
 
-Migrations `0004`–`0007` apply in order and are additive. After `0004`, existing
+Migrations `0004`–`0006` apply in order and are additive. After `0004`, existing
 rows belong to `legacy-shared-cabinet`; claim them with:
 
 ```sql
