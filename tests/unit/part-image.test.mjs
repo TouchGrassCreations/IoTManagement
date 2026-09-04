@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { PART_IMAGE_MAX_CHARACTERS, cropRectFromBox, thumbnailSize, validatePartImage } from "../lib/identification/image.ts";
-import { partCode } from "../lib/identification/validation.ts";
+import { PART_IMAGE_MAX_CHARACTERS, cropRectFromBox, thumbnailSize, validatePartImage } from "../../lib/identification/image.ts";
+import { partCode } from "../../lib/identification/validation.ts";
 
 const box = { top: 0.25, left: 0.25, width: 0.5, height: 0.5 };
 

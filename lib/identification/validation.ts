@@ -53,33 +53,64 @@ const strings = (value: unknown, field: string, max = 10) => {
   return value.map((item) => text(item, field, 120));
 };
 const box = (value: unknown): BoundingBox => {
-  const v = object(value);
-  const result = { top: Number(v.top), left: Number(v.left), width: Number(v.width), height: Number(v.height) };
-  if (Object.values(result).some((n) => !Number.isFinite(n) || n < 0 || n > 1) || result.top + result.height > 1.001 || result.left + result.width > 1.001 || result.width === 0 || result.height === 0) throw new Error("boundingBox is invalid");
+  const raw = object(value);
+  const result = { top: Number(raw.top), left: Number(raw.left), width: Number(raw.width), height: Number(raw.height) };
+  const outOfRange = Object.values(result).some((edge) => !Number.isFinite(edge) || edge < 0 || edge > 1);
+  // The 1.001 slack absorbs the model's rounding without accepting a box that
+  // genuinely runs off the photo.
+  const overflows = result.top + result.height > 1.001 || result.left + result.width > 1.001;
+  if (outOfRange || overflows || result.width === 0 || result.height === 0) throw new Error("boundingBox is invalid");
   return result;
 };
 
 /** Short label shown on a part card. Falls back to the model-unknown marker. */
 export function partCode(model: string | null) {
-  const code = (model ?? "").normalize("NFKC").toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 14).replace(/-+$/, "");
+  const code = (model ?? "")
+    .normalize("NFKC")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 14)
+    .replace(/-+$/, "");
   return code || "MODEL-UNKNOWN";
 }
 
 export function normalizeIdentity(value: string) {
-  return value.normalize("NFKC").replace(/[‐‑‒–—―]/g, "-").trim().replace(/\s+/g, " ").toLowerCase();
+  return value
+    .normalize("NFKC")
+    .replace(/[‐‑‒–—―]/g, "-")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
 }
 
 function alternatives(value: unknown): Alternative[] {
   if (!Array.isArray(value) || value.length > 3) throw new Error("alternatives is invalid");
-  return value.map((candidate) => { const v = object(candidate); return { name: text(v.name, "alternative name"), model: nullableText(v.model, "alternative model") }; });
+  return value.map((candidate) => {
+    const raw = object(candidate);
+    return { name: text(raw.name, "alternative name"), model: nullableText(raw.model, "alternative model") };
+  });
 }
 
 function detection(value: unknown): Detection {
-  const v = object(value);
-  const quantity = Number(v.quantity); const confidence = Number(v.confidence);
+  const raw = object(value);
+  const quantity = Number(raw.quantity);
+  const confidence = Number(raw.confidence);
   if (!Number.isInteger(quantity) || quantity < 1 || quantity > 999) throw new Error("quantity is invalid");
   if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) throw new Error("confidence is invalid");
-  return { name: text(v.name, "Name"), model: nullableText(v.model, "Model"), category: normalizeCategory(text(v.category, "Category")), quantity, boundingBox: box(v.boundingBox), confidence, visibleMarkings: strings(v.visibleMarkings, "visibleMarkings"), alternatives: alternatives(v.alternatives), description: text(v.description, "Description", 500), tags: strings(v.tags, "tags") };
+
+  return {
+    name: text(raw.name, "Name"),
+    model: nullableText(raw.model, "Model"),
+    category: normalizeCategory(text(raw.category, "Category")),
+    quantity,
+    boundingBox: box(raw.boundingBox),
+    confidence,
+    visibleMarkings: strings(raw.visibleMarkings, "visibleMarkings"),
+    alternatives: alternatives(raw.alternatives),
+    description: text(raw.description, "Description", 500),
+    tags: strings(raw.tags, "tags"),
+  };
 }
 
 export function validateGeminiPayload(value: unknown): Detection[] {
@@ -88,21 +119,52 @@ export function validateGeminiPayload(value: unknown): Detection[] {
   return detections.map(detection);
 }
 
+/** A manual row carries no box or confidence, so stand-ins keep `detection` happy. */
+const WHOLE_IMAGE_BOX = { top: 0, left: 0, width: 1, height: 1 };
+
+function reviewItem(raw: unknown): ReviewItem[] {
+  const row = object(raw);
+  const validSource = ["gemini", "manual"].includes(String(row.source));
+  if (typeof row.id !== "string" || typeof row.accepted !== "boolean" || !validSource) {
+    throw new Error("Review data is invalid");
+  }
+  if (!row.accepted) return [];
+
+  const base = detection({
+    ...row,
+    boundingBox: row.boundingBox ?? WHOLE_IMAGE_BOX,
+    confidence: row.confidence ?? 0,
+  });
+  const fromGemini = row.source === "gemini";
+  const unset = row.location === undefined || row.location === null || row.location === "";
+
+  return [{
+    ...base,
+    id: row.id,
+    accepted: true,
+    source: row.source as "gemini" | "manual",
+    boundingBox: row.boundingBox === null ? null : base.boundingBox,
+    confidence: row.confidence === null ? null : base.confidence,
+    detectedName: fromGemini ? nullableText(row.detectedName ?? row.name, "Detected name") : null,
+    detectedModel: fromGemini ? nullableText(row.detectedModel ?? row.model, "Detected model") : null,
+    location: unset ? "Unsorted" : text(row.location, "Storage location"),
+    image: validatePartImage(row.image),
+  }];
+}
+
 export function validateConfirmationPayload(value: unknown): ConfirmRequest {
-  const v = object(value); const token = text(v.token, "token", 2000);
-  if (!Array.isArray(v.items) || v.items.length > MAX_ITEMS) throw new Error("items is invalid");
-  const items = v.items.flatMap((raw, index): ReviewItem[] => {
-    const row = object(raw);
-    if (typeof row.id !== "string" || typeof row.accepted !== "boolean" || !["gemini", "manual"].includes(String(row.source))) throw new Error(`Component ${index + 1}: Review data is invalid`);
-    if (!row.accepted) return [];
+  const raw = object(value);
+  const token = text(raw.token, "token", 2000);
+  if (!Array.isArray(raw.items) || raw.items.length > MAX_ITEMS) throw new Error("items is invalid");
+
+  const items = raw.items.flatMap((row, index): ReviewItem[] => {
     try {
-      const base = detection({ ...row, boundingBox: row.boundingBox ?? { top: 0, left: 0, width: 1, height: 1 }, confidence: row.confidence ?? 0 });
-      const location = row.location === undefined || row.location === null || row.location === "" ? "Unsorted" : text(row.location, "Storage location");
-      return [{ ...base, id: row.id, accepted: true, source: row.source as "gemini" | "manual", boundingBox: row.boundingBox === null ? null : base.boundingBox, confidence: row.confidence === null ? null : base.confidence, detectedName: row.source === "gemini" ? nullableText(row.detectedName ?? row.name, "Detected name") : null, detectedModel: row.source === "gemini" ? nullableText(row.detectedModel ?? row.model, "Detected model") : null, location, image: validatePartImage(row.image) }];
+      return reviewItem(row);
     } catch (error) {
       throw new Error(`Component ${index + 1}: ${error instanceof Error ? error.message : "Invalid data"}`);
     }
   });
+
   if (!items.some((item) => item.accepted)) throw new Error("At least one item must be accepted");
   return { token, items };
 }

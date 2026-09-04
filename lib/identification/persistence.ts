@@ -1,9 +1,164 @@
-import type { ConfirmRequest, InventoryResult } from "./types.ts";
+import type { ConfirmRequest, InventoryResult, ReviewItem } from "./types.ts";
 import { normalizeIdentity, partCode } from "./validation.ts";
 import { verifyConfirmationToken } from "./tokens.ts";
-type Statement={bind(...v:unknown[]):Statement;first<T=unknown>():Promise<T|null>;all<T=unknown>():Promise<{results:T[]}>};
-export type D1Like={prepare(sql:string):Statement;batch(statements:Statement[]):Promise<unknown[]>};
-export type ConfirmResult={scanId:string;inventory:InventoryResult[]};
-async function hash(v:string){return Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(v))),byte=>byte.toString(16).padStart(2,"0")).join("")}
-async function loadScan(scanId:string,db:D1Like):Promise<ConfirmResult>{const rows=await db.prepare("SELECT DISTINCT p.id,p.name,p.model,p.category,p.quantity,p.location,p.description,p.tags,p.image FROM inventory_parts p JOIN identification_events e ON e.inventory_part_id=p.id WHERE e.scan_id=?").bind(scanId).all<Omit<InventoryResult,"tags">&{tags:string}>();return{scanId,inventory:rows.results.map(r=>({...r,tags:JSON.parse(r.tags) as string[]}))}}
-export async function confirmIdentification(input:ConfirmRequest,db:D1Like,options?:{secret?:string;model?:string}):Promise<ConfirmResult>{await verifyConfirmationToken(input.token,options?.secret);const tokenHash=await hash(input.token);const prior=await db.prepare("SELECT id FROM identification_scans WHERE confirmation_token_hash=?").bind(tokenHash).first<{id:string}>();if(prior)return loadScan(prior.id,db);const accepted=input.items.filter(i=>i.accepted),scanId=crypto.randomUUID();const q:Statement[]=[db.prepare("INSERT INTO identification_scans(id,confirmation_token_hash,user_id,provider,provider_model,accepted_detection_count) VALUES(?,?,NULL,'gemini',?,?)").bind(scanId,tokenHash,options?.model??process.env.GEMINI_MODEL??"gemini-3.1-flash-lite",accepted.length)];for(const i of accepted){const n=normalizeIdentity(i.name),m=i.model?normalizeIdentity(i.model):"__unknown__",edited=i.source==="gemini"&&(normalizeIdentity(i.detectedName||"")!==n||normalizeIdentity(i.detectedModel||"")!==normalizeIdentity(i.model||""));q.push(db.prepare("INSERT INTO inventory_parts(id,name,normalized_name,model,model_key,category,quantity,location,code,description,tags,image) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(normalized_name,model_key) DO UPDATE SET quantity=quantity+excluded.quantity,name=excluded.name,category=excluded.category,location=COALESCE(NULLIF(excluded.location,'Unsorted'),inventory_parts.location),code=COALESCE(NULLIF(excluded.code,'MODEL-UNKNOWN'),inventory_parts.code),description=excluded.description,tags=excluded.tags,image=COALESCE(excluded.image,inventory_parts.image),updated_at=CURRENT_TIMESTAMP").bind(crypto.randomUUID(),i.name,n,i.model,m,i.category,i.quantity,i.location,partCode(i.model),i.description,JSON.stringify(i.tags),i.image));q.push(db.prepare("INSERT INTO identification_events(id,scan_id,inventory_part_id,source,detected_name,detected_model,confirmed_name,confirmed_model,quantity_added,confidence,visible_markings,bounding_box,alternatives,was_edited,captured_image) VALUES(?,?,(SELECT id FROM inventory_parts WHERE normalized_name=? AND model_key=?),?,?,?,?,?,?,?,?,?,?,?,?)").bind(crypto.randomUUID(),scanId,n,m,i.source,i.detectedName,i.detectedModel,i.name,i.model,i.quantity,i.confidence===null?null:Math.round(i.confidence*1000),JSON.stringify(i.visibleMarkings),i.boundingBox?JSON.stringify(i.boundingBox):null,JSON.stringify(i.alternatives),edited?1:0,i.image?1:0))}await db.batch(q);return loadScan(scanId,db)}
+
+type Statement = {
+  bind(...values: unknown[]): Statement;
+  first<T = unknown>(): Promise<T | null>;
+  all<T = unknown>(): Promise<{ results: T[] }>;
+};
+
+export type D1Like = {
+  prepare(sql: string): Statement;
+  batch(statements: Statement[]): Promise<unknown[]>;
+};
+
+export type ConfirmResult = { scanId: string; inventory: InventoryResult[] };
+export type ConfirmOptions = { ownerId: string; secret?: string; model?: string };
+
+const DEFAULT_PROVIDER_MODEL = "gemini-3.1-flash-lite";
+const UNKNOWN_MODEL_KEY = "__unknown__";
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function loadScan(scanId: string, ownerId: string, db: D1Like): Promise<ConfirmResult> {
+  const rows = await db
+    .prepare(
+      `SELECT DISTINCT p.id,p.name,p.model,p.category,p.quantity,p.location,p.description,p.tags,p.image
+       FROM inventory_parts p
+       JOIN identification_events e ON e.inventory_part_id = p.id
+       WHERE e.scan_id = ? AND e.owner_id = ? AND p.owner_id = ?`,
+    )
+    .bind(scanId, ownerId, ownerId)
+    .all<Omit<InventoryResult, "tags"> & { tags: string }>();
+
+  return {
+    scanId,
+    inventory: rows.results.map((row) => ({ ...row, tags: JSON.parse(row.tags) as string[] })),
+  };
+}
+
+function modelKeyFor(model: string | null): string {
+  return model ? normalizeIdentity(model) : UNKNOWN_MODEL_KEY;
+}
+
+function wasEdited(item: ReviewItem, normalizedName: string): boolean {
+  if (item.source !== "gemini") return false;
+  const nameChanged = normalizeIdentity(item.detectedName || "") !== normalizedName;
+  const modelChanged = normalizeIdentity(item.detectedModel || "") !== normalizeIdentity(item.model || "");
+  return nameChanged || modelChanged;
+}
+
+/**
+ * The confirmation token is owner-agnostic, so a replay by a second owner is
+ * refused here rather than colliding on the globally unique token hash.
+ */
+export async function confirmIdentification(
+  input: ConfirmRequest,
+  db: D1Like,
+  options: ConfirmOptions,
+): Promise<ConfirmResult> {
+  await verifyConfirmationToken(input.token, options.secret);
+  const tokenHash = await sha256Hex(input.token);
+
+  const prior = await db
+    .prepare("SELECT id,owner_id FROM identification_scans WHERE confirmation_token_hash = ?")
+    .bind(tokenHash)
+    .first<{ id: string; owner_id: string }>();
+  if (prior) {
+    if (prior.owner_id !== options.ownerId) throw new Error("Invalid confirmation token");
+    return loadScan(prior.id, options.ownerId, db);
+  }
+
+  const accepted = input.items.filter((item) => item.accepted);
+  const scanId = crypto.randomUUID();
+  const providerModel = options.model ?? process.env.GEMINI_MODEL ?? DEFAULT_PROVIDER_MODEL;
+
+  const statements: Statement[] = [
+    db
+      .prepare(
+        `INSERT INTO identification_scans
+           (id,owner_id,confirmation_token_hash,user_id,provider,provider_model,accepted_detection_count)
+         VALUES (?,?,?,?,'gemini',?,?)`,
+      )
+      .bind(scanId, options.ownerId, tokenHash, options.ownerId, providerModel, accepted.length),
+  ];
+
+  for (const item of accepted) {
+    const normalizedName = normalizeIdentity(item.name);
+    const modelKey = modelKeyFor(item.model);
+
+    statements.push(
+      db
+        .prepare(
+          `INSERT INTO inventory_parts
+             (id,owner_id,name,normalized_name,model,model_key,category,quantity,location,code,description,tags,image)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+           ON CONFLICT(owner_id,normalized_name,model_key) DO UPDATE SET
+             quantity = quantity + excluded.quantity,
+             name = excluded.name,
+             category = excluded.category,
+             location = COALESCE(NULLIF(excluded.location,'Unsorted'),inventory_parts.location),
+             code = COALESCE(NULLIF(excluded.code,'MODEL-UNKNOWN'),inventory_parts.code),
+             description = excluded.description,
+             tags = excluded.tags,
+             image = COALESCE(excluded.image,inventory_parts.image),
+             updated_at = CURRENT_TIMESTAMP`,
+        )
+        .bind(
+          crypto.randomUUID(),
+          options.ownerId,
+          item.name,
+          normalizedName,
+          item.model,
+          modelKey,
+          item.category,
+          item.quantity,
+          item.location,
+          partCode(item.model),
+          item.description,
+          JSON.stringify(item.tags),
+          item.image,
+        ),
+    );
+
+    statements.push(
+      db
+        .prepare(
+          `INSERT INTO identification_events
+             (id,owner_id,scan_id,inventory_part_id,source,detected_name,detected_model,confirmed_name,
+              confirmed_model,quantity_added,confidence,visible_markings,bounding_box,alternatives,
+              was_edited,captured_image)
+           VALUES (?,?,?,
+             (SELECT id FROM inventory_parts WHERE owner_id = ? AND normalized_name = ? AND model_key = ?),
+             ?,?,?,?,?,?,?,?,?,?,?,?)`,
+        )
+        .bind(
+          crypto.randomUUID(),
+          options.ownerId,
+          scanId,
+          options.ownerId,
+          normalizedName,
+          modelKey,
+          item.source,
+          item.detectedName,
+          item.detectedModel,
+          item.name,
+          item.model,
+          item.quantity,
+          item.confidence === null ? null : Math.round(item.confidence * 1000),
+          JSON.stringify(item.visibleMarkings),
+          item.boundingBox ? JSON.stringify(item.boundingBox) : null,
+          JSON.stringify(item.alternatives),
+          wasEdited(item, normalizedName) ? 1 : 0,
+          item.image ? 1 : 0,
+        ),
+    );
+  }
+
+  await db.batch(statements);
+  return loadScan(scanId, options.ownerId, db);
+}

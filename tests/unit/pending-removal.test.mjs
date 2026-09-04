@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createPendingRemoval } from "../lib/inventory/pending-removal.ts";
+import { createPendingRemoval } from "../../lib/inventory/pending-removal.ts";
 
 function fakeTimer() {
   let nextId = 1;

@@ -1,4 +1,6 @@
 import { issueConfirmationToken } from "../../../../lib/identification/tokens.ts";
+import { respond } from "../../../../lib/http/respond.ts";
+import { routeContext } from "../../../../lib/http/context.ts";
 
 type Dependencies = { issueToken: () => Promise<string> };
 
@@ -16,8 +18,9 @@ export async function handleIdentifyTokenRequest(deps: Dependencies): Promise<Re
   }
 }
 
-export async function POST(): Promise<Response> {
-  const { env } = await import("cloudflare:workers");
-  const bindings = env as unknown as Record<string, string>;
-  return handleIdentifyTokenRequest({ issueToken: () => issueConfirmationToken(bindings.CONFIRMATION_TOKEN_SECRET) });
+export async function POST(request: Request): Promise<Response> {
+  return respond("Confirmation token", async () => {
+    const { env } = await routeContext(request);
+    return handleIdentifyTokenRequest({ issueToken: () => issueConfirmationToken(env.CONFIRMATION_TOKEN_SECRET) });
+  });
 }

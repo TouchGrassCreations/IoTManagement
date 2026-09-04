@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { handleIdentifyRequest } from "../app/api/identify/route.ts";
-import { handleConfirmRequest } from "../app/api/identify/confirm/route.ts";
-import { handleIdentifyTokenRequest } from "../app/api/identify/token/route.ts";
-import { recognizeComponents } from "../lib/identification/gemini.ts";
+import { handleIdentifyRequest } from "../../app/api/identify/route.ts";
+import { handleConfirmRequest } from "../../app/api/identify/confirm/route.ts";
+import { handleIdentifyTokenRequest } from "../../app/api/identify/token/route.ts";
+import { recognizeComponents } from "../../lib/identification/gemini.ts";
 
 const sample = { name: "HC-SR04 ultrasonic sensor", model: "HC-SR04", category: "Sensors", quantity: 1, boundingBox: { top: .1, left: .1, width: .3, height: .2 }, confidence: .93, visibleMarkings: ["HC-SR04"], alternatives: [], description: "Ultrasonic distance sensor", tags: ["distance", "5V"] };
 
@@ -14,7 +14,7 @@ function imageRequest(type = "image/png") {
 }
 
 test("returns provisional detections without image data", async () => {
-  const response = await handleIdentifyRequest(imageRequest(), { recognize: async () => [sample], issueToken: async () => "signed-token" });
+  const response = await handleIdentifyRequest(imageRequest(), { enforceRateLimit: async () => {}, recognize: async () => [sample], issueToken: async () => "signed-token" });
   assert.equal(response.status, 200);
   const payload = await response.json();
   assert.deepEqual(payload, { detections: [sample], token: "signed-token" });
@@ -22,12 +22,12 @@ test("returns provisional detections without image data", async () => {
 });
 
 test("rejects unsupported image content", async () => {
-  const response = await handleIdentifyRequest(imageRequest("text/plain"), { recognize: async () => [], issueToken: async () => "unused" });
+  const response = await handleIdentifyRequest(imageRequest("text/plain"), { enforceRateLimit: async () => {}, recognize: async () => [], issueToken: async () => "unused" });
   assert.equal(response.status, 400);
 });
 
 test("maps provider failures without returning a token", async () => {
-  const response = await handleIdentifyRequest(imageRequest(), { recognize: async () => { throw new Error("Gemini quota exceeded"); }, issueToken: async () => { throw new Error("must not run"); } });
+  const response = await handleIdentifyRequest(imageRequest(), { enforceRateLimit: async () => {}, recognize: async () => { throw new Error("Gemini quota exceeded"); }, issueToken: async () => { throw new Error("must not run"); } });
   assert.equal(response.status, 502);
   assert.deepEqual(await response.json(), { error: "Identification is temporarily unavailable. Please retry." });
 });

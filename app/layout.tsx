@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { DM_Sans, Space_Grotesk } from "next/font/google";
+import ServiceWorker from "./components/ServiceWorker";
 import "./globals.css";
 
 const bodyFont = DM_Sans({ variable: "--font-body", subsets: ["latin"] });
@@ -8,7 +9,10 @@ const displayFont = Space_Grotesk({ variable: "--font-display", subsets: ["latin
 export const metadata: Metadata = {
   title: "Parts Cabinet — IoT Inventory & Project Planner",
   description: "Catalog your hobby electronics, identify mystery modules, and see which IoT projects you can build next.",
-  icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
+  icons: { icon: "/favicon.svg", shortcut: "/favicon.svg", apple: "/favicon.svg" },
+  // The camera is the whole interaction, so the app installs to a phone.
+  manifest: "/manifest.webmanifest",
+  appleWebApp: { capable: true, title: "Parts Cabinet", statusBarStyle: "default" },
   openGraph: {
     title: "Parts Cabinet",
     description: "Know what you have. Build what you imagine.",
@@ -23,5 +27,12 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en"><body className={`${bodyFont.variable} ${displayFont.variable}`}>{children}</body></html>;
+  return (
+    <html lang="en">
+      <body className={`${bodyFont.variable} ${displayFont.variable}`}>
+        {children}
+        <ServiceWorker />
+      </body>
+    </html>
+  );
 }
