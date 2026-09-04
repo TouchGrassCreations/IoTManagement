@@ -12,9 +12,13 @@ import { ApiError, fetchInventory, fetchSummary, partPhotoUrl, removePart, saveP
 import { createPendingRemoval } from "../../lib/inventory/pending-removal.ts";
 import { projectInventoryWithPending } from "../../lib/inventory/optimistic-inventory.ts";
 import { createInventoryResponseGuard } from "../../lib/inventory/response-guard.ts";
+import type { CsvRowError } from "../../lib/inventory/csv.ts";
 import type { InventoryItem, InventorySummary } from "../../lib/inventory/types.ts";
+import { datasheetSearchUrl } from "../../lib/parts/datasheet.ts";
 
 type PendingRemoval = { item: InventoryItem; quantity: number; deadline: number };
+
+type ImportResponse = { imported: number; created: number; merged: number; error?: string; rows?: CsvRowError[] };
 
 const SORT_LABELS: { value: InventorySort; label: string }[] = [
   { value: "name", label: "A–Z" },
@@ -47,11 +51,15 @@ export default function InventoryView({ refreshToken, onIdentify }: { refreshTok
   const [savingEdit, setSavingEdit] = useState(false);
   const [removeItem, setRemoveItem] = useState<InventoryItem | null>(null);
   const [pendingRemovals, setPendingRemovals] = useState<PendingRemoval[]>([]);
+  const [importing, setImporting] = useState(false);
+  const [importMessage, setImportMessage] = useState("");
+  const [importErrors, setImportErrors] = useState<CsvRowError[]>([]);
 
   const removalController = useRef(createPendingRemoval());
   const responseGuard = useRef(createInventoryResponseGuard());
   const removalOpeners = useRef(new Map<string, HTMLButtonElement>());
   const photoInput = useRef<HTMLInputElement>(null);
+  const csvInput = useRef<HTMLInputElement>(null);
 
   // Typing filters the server-side query, so hold off until the user pauses.
   useEffect(() => {
@@ -148,6 +156,40 @@ export default function InventoryView({ refreshToken, onIdentify }: { refreshTok
       setError("");
     } catch (failure) {
       reportError(failure, "The photo could not be saved.");
+    }
+  }
+
+  function openCsvPicker() {
+    if (csvInput.current) {
+      csvInput.current.value = "";
+      csvInput.current.click();
+    }
+  }
+
+  async function importCsv(file: File | null) {
+    if (!file) return;
+    setImporting(true);
+    setImportMessage("");
+    setImportErrors([]);
+    try {
+      const response = await fetch("/api/inventory/import", {
+        method: "POST",
+        headers: { "content-type": "text/csv" },
+        body: await file.text(),
+      });
+      const payload = (await response.json().catch(() => null)) as ImportResponse | null;
+      if (!response.ok || !payload) {
+        setImportErrors(payload?.rows ?? []);
+        throw new ApiError(payload?.error || "That file could not be imported.", response.status);
+      }
+      setImportMessage(
+        `Imported ${payload.imported} ${payload.imported === 1 ? "row" : "rows"} — ${payload.created} new, ${payload.merged} added to parts you already had.`,
+      );
+      await load();
+    } catch (failure) {
+      reportError(failure, "That file could not be imported.");
+    } finally {
+      setImporting(false);
     }
   }
 
@@ -268,6 +310,12 @@ export default function InventoryView({ refreshToken, onIdentify }: { refreshTok
             {SORT_LABELS.map((entry) => <option key={entry.value} value={entry.value}>{entry.label}</option>)}
           </select>
         </label>
+        <div className="file-controls">
+          <a className="file-button" href="/api/inventory/export" download>Export CSV</a>
+          <button type="button" className="file-button" onClick={openCsvPicker} disabled={importing}>
+            {importing ? "Importing…" : "Import CSV"}
+          </button>
+        </div>
         <button className="add-button" onClick={onIdentify}><span aria-hidden="true">◉</span> Identify &amp; catalogue</button>
       </section>
 
@@ -308,6 +356,12 @@ export default function InventoryView({ refreshToken, onIdentify }: { refreshTok
 
         <div className="parts-panel">
           {error && <p className="inventory-message error" role="alert">{error} <button type="button" onClick={() => void load()}>Retry</button></p>}
+          {importErrors.length > 0 && (
+            <ul className="inventory-message error import-errors" aria-label="Rows that could not be imported">
+              {importErrors.map((entry) => <li key={entry.row}>Row {entry.row}: {entry.message}</li>)}
+            </ul>
+          )}
+          {importMessage && <p className="inventory-message" role="status">{importMessage}</p>}
           {loading && <p className="inventory-message" role="status">Loading inventory…</p>}
           <div className="section-heading">
             <div><p className="eyebrow">INVENTORY</p><h2>{location ? `Bin ${location}` : category}</h2></div>
@@ -315,37 +369,51 @@ export default function InventoryView({ refreshToken, onIdentify }: { refreshTok
           </div>
 
           <div className="parts-grid">
-            {displayed.map((part) => (
-              <article className="part-card" key={part.id}>
-                <div className={`part-visual purple ${part.hasImage ? "has-photo" : ""}`}>
-                  {part.hasImage ? <img src={partPhotoUrl(part)} alt={part.name} loading="lazy" /> : <span>{symbolFor(part.name)}</span>}
-                  <small>{part.code}</small>
-                  {!part.hasImage && <button type="button" className="attach-photo-button" onClick={() => openPhotoPicker(part.id)}>＋ Add photo</button>}
-                </div>
-                <div className="part-body">
-                  <div className="part-top"><span>{part.category}</span><strong>×{part.quantity}</strong></div>
-                  <h3>{part.name}</h3>
-                  <p>{part.description}</p>
-                  <div className="tags">{part.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>
-                  <footer>
-                    <span>⌖ {part.location}</span>
-                    <span className="card-actions">
-                      <button type="button" className="edit-part-button" onClick={() => { setEditItem(part); setEditError(""); }} aria-label={`Edit ${part.name}`}>Edit</button>
-                      <button
-                        ref={(element) => { if (element) removalOpeners.current.set(part.id, element); else removalOpeners.current.delete(part.id); }}
-                        type="button"
-                        className="remove-part-button"
-                        disabled={pendingRemovals.some((pending) => pending.item.id === part.id)}
-                        onClick={() => setRemoveItem(part)}
-                        aria-label={`Remove ${part.name} from inventory`}
-                      >
-                        Remove
-                      </button>
-                    </span>
-                  </footer>
-                </div>
-              </article>
-            ))}
+            {displayed.map((part) => {
+              const datasheet = datasheetSearchUrl(part);
+              return (
+                <article className="part-card" key={part.id}>
+                  <div className={`part-visual purple ${part.hasImage ? "has-photo" : ""}`}>
+                    {part.hasImage ? <img src={partPhotoUrl(part)} alt={part.name} loading="lazy" /> : <span>{symbolFor(part.name)}</span>}
+                    <small>{part.code}</small>
+                    {!part.hasImage && <button type="button" className="attach-photo-button" onClick={() => openPhotoPicker(part.id)}>＋ Add photo</button>}
+                  </div>
+                  <div className="part-body">
+                    <div className="part-top"><span>{part.category}</span><strong>×{part.quantity}</strong></div>
+                    <h3>{part.name}</h3>
+                    <p>{part.description}</p>
+                    <div className="tags">{part.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>
+                    <footer>
+                      <span>⌖ {part.location}</span>
+                      <span className="card-actions">
+                        {datasheet && (
+                          <a
+                            className="datasheet-link"
+                            href={datasheet}
+                            target="_blank"
+                            rel="noreferrer"
+                            aria-label={`Search for the ${part.model ?? part.name} datasheet`}
+                          >
+                            Datasheet
+                          </a>
+                        )}
+                        <button type="button" className="edit-part-button" onClick={() => { setEditItem(part); setEditError(""); }} aria-label={`Edit ${part.name}`}>Edit</button>
+                        <button
+                          ref={(element) => { if (element) removalOpeners.current.set(part.id, element); else removalOpeners.current.delete(part.id); }}
+                          type="button"
+                          className="remove-part-button"
+                          disabled={pendingRemovals.some((pending) => pending.item.id === part.id)}
+                          onClick={() => setRemoveItem(part)}
+                          aria-label={`Remove ${part.name} from inventory`}
+                        >
+                          Remove
+                        </button>
+                      </span>
+                    </footer>
+                  </div>
+                </article>
+              );
+            })}
 
             {displayed.length === 0 && !loading && (
               <div className="empty">
@@ -373,6 +441,16 @@ export default function InventoryView({ refreshToken, onIdentify }: { refreshTok
         aria-hidden="true"
         tabIndex={-1}
         onChange={(event) => void attachPhoto(event.target.files?.[0] || null)}
+      />
+
+      <input
+        ref={csvInput}
+        className="hidden-photo-input"
+        type="file"
+        accept=".csv,text/csv"
+        aria-hidden="true"
+        tabIndex={-1}
+        onChange={(event) => void importCsv(event.target.files?.[0] || null)}
       />
 
       {editItem && (

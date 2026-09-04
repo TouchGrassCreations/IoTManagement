@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import HistoryView from "./components/HistoryView";
 import IdentificationWorkspace from "./components/IdentificationWorkspace";
 import InventoryView from "./components/InventoryView";
 import ProjectsView from "./components/ProjectsView";
 
-const nav = ["Inventory", "Projects"] as const;
+const nav = ["Inventory", "Projects", "History"] as const;
 
 export default function Home() {
   const [view, setView] = useState<(typeof nav)[number]>("Inventory");
@@ -33,11 +34,11 @@ export default function Home() {
         </div>
       </header>
 
-      {view === "Inventory" ? (
+      {view === "Inventory" && (
         <InventoryView refreshToken={refreshToken} onIdentify={() => setIsIdentifying(true)} />
-      ) : (
-        <ProjectsView />
       )}
+      {view === "Projects" && <ProjectsView />}
+      {view === "History" && <HistoryView refreshToken={refreshToken} />}
 
       {isIdentifying && (
         <IdentificationWorkspace

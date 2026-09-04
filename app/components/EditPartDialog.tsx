@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { INVENTORY_CATEGORIES } from "../../lib/identification/validation.ts";
 import type { InventoryItem } from "../../lib/inventory/types.ts";
+import { datasheetSearchUrl } from "../../lib/parts/datasheet.ts";
 
 export type PartEdit = {
   name: string;
@@ -42,6 +43,8 @@ export default function EditPartDialog({ item, saving, error, onCancel, onSave }
   }, [onCancel]);
 
   const identityChanged = name.trim() !== item.name || (model.trim() || null) !== item.model;
+  // Follows what is typed, so the link is worth clicking before the edit is saved.
+  const datasheet = datasheetSearchUrl({ name: name.trim(), model: model.trim() || null });
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -71,6 +74,12 @@ export default function EditPartDialog({ item, saving, error, onCancel, onSave }
             <label>Model<input value={model} placeholder="Model unknown" onChange={(event) => setModel(event.target.value)} maxLength={120} /></label>
             <label>In stock<input type="number" min="1" max="999999" value={quantity} onChange={(event) => setQuantity(Math.max(1, Number.parseInt(event.target.value, 10) || 1))} /></label>
           </div>
+          {datasheet && (
+            <p className="datasheet-hint">
+              <a className="datasheet-link" href={datasheet} target="_blank" rel="noreferrer">Search for the datasheet</a>
+              {model.trim() ? " for this model" : " by name, until a model is filled in"}
+            </p>
+          )}
           <div className="form-row">
             <label>Category
               <select value={category} onChange={(event) => setCategory(event.target.value)}>

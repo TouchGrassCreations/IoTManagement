@@ -122,6 +122,40 @@ and the `429` carries a `Retry-After`.
   refusing the edit and leaving you with a duplicate.
 - **Removal** is undoable for ten seconds, and several removals can be pending
   at once. Removing the last unit deletes the part and its history.
+- **Datasheets** are one click from a part card. The link is a search on the
+  confirmed model, falling back to the part name — a guessed vendor URL built
+  from a model number 404s as often as it resolves.
+- **CSV export and import** give the data somewhere to live besides D1. Import
+  upserts on the same identity the catalogue merges on, so re-importing adds
+  stock to the row already there rather than creating a duplicate. A file with
+  one unreadable row imports nothing and reports every problem against the row
+  it came from.
+
+## Projects
+
+A project declares the parts a build needs; the planner matches those
+requirements against live inventory and reports what is ready, what is missing,
+and what to buy. Readiness is computed on read, so it cannot go stale as parts
+are scanned, edited or removed.
+
+Requirements match either on identity — the same `normalized_name + model_key`
+the catalogue merges on — or on category alone, which covers "20 × any jumper
+wire". Readiness is `sum(owned units) / sum(required units)`; it answers "how
+much of the shopping list is done", while the separate ready flag answers "can I
+start". Five starter templates seed a new cabinet so the tab is not empty.
+
+## History
+
+Every scan, confirmation, edit, merge and stock adjustment is already recorded.
+The History tab reads that trail back as a reverse-chronological timeline,
+owner-scoped and cursor-paginated.
+
+## Offline
+
+The app installs as a PWA and keeps its shell available without a signal. The
+service worker caches build assets by content hash and the app shell
+network-first; it never caches anything under `/api`, because inventory served
+from an old visit and presented as current is worse than an error.
 
 ## Data model
 
