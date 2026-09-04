@@ -53,6 +53,41 @@ function wasEdited(item: ReviewItem, normalizedName: string): boolean {
 }
 
 /**
+ * Adds each confirmed part to the project its review row chose, creating a
+ * project the model proposed only once the part that inspired it is saved. A
+ * project deleted mid-review must not fail the whole confirmation, so a failure
+ * here is swallowed after the inventory is already written.
+ */
+async function fileIntoProjects(items: ReviewItem[], ownerId: string, db: D1Like): Promise<void> {
+  const chosen = items.filter((item) => item.projectId || item.newProjectName);
+  if (chosen.length === 0) return;
+
+  const { appendProjectRequirements, ensureProjectNamed } = await import("../projects/persistence.ts");
+  for (const item of chosen) {
+    try {
+      const projectId = item.newProjectName
+        ? await ensureProjectNamed(item.newProjectName, item.projectReason ?? "", ownerId, db)
+        : item.projectId!;
+      await appendProjectRequirements(
+        projectId,
+        [{
+          name: item.name,
+          model: item.model,
+          category: item.category,
+          quantityRequired: item.quantity,
+          matchMode: "identity",
+          note: null,
+        }],
+        ownerId,
+        db,
+      );
+    } catch (error) {
+      console.error("Filing a confirmed part into its project failed", error);
+    }
+  }
+}
+
+/**
  * The confirmation token is owner-agnostic, so a replay by a second owner is
  * refused here rather than colliding on the globally unique token hash.
  */
@@ -160,5 +195,6 @@ export async function confirmIdentification(
   }
 
   await db.batch(statements);
+  await fileIntoProjects(accepted, options.ownerId, db);
   return loadScan(scanId, options.ownerId, db);
 }

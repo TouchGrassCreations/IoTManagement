@@ -54,6 +54,21 @@ reach**, or every stranger shares one cabinet.
 Scoping is enforced in the persistence layer rather than in the routes, so a
 handler that forgets to check returns nothing instead of somebody else's data.
 
+### Sharing a cabinet
+
+A cabinet is private by default. Its owner can share it from the bar under the
+header, which opens `/c/<owner id>` to anyone holding the link. Making it
+private again closes the link immediately.
+
+- Sharing is read-only. A visitor gets the same Inventory and Projects views
+  with every mutating control removed, and the write routes refuse them anyway.
+- Reads accept `?owner=`, resolved by `resolveReadScope`: your own cabinet
+  always, someone else's only while it is public, and nothing at all without
+  either. `GET` for inventory, summary, photos and projects go through it; CSV
+  export, import, history and the shopping list stay owner-only.
+- Rows left over from before multi-tenancy belong to `legacy-shared-cabinet`,
+  which has no cabinet row and can never be shared.
+
 ### Claiming rows that predate multi-tenancy
 
 Migration `0004` parks every pre-existing row on `legacy-shared-cabinet`, an
@@ -99,7 +114,10 @@ Confirmed parts store a cropped thumbnail as a data URL in
   `hasImage`, and each tile is fetched from
   `GET /api/inventory/:id/photo?v=<updatedAt>` as real bytes, with an ETag and
   an immutable cache. A changed photo changes `updatedAt`, which busts the URL.
-- Parts without a photo keep the lettered tile and offer **Add photo**.
+- Parts without a photo keep the lettered tile and offer **Add photo**; a part
+  that has one offers **Remove photo**, which clears the crop through
+  `POST /api/inventory/:id/photo` with `{"image": null}` without deleting the
+  part.
 
 The prototype accepts images up to 10 MiB and sends them to the Gemini API for
 processing; review Google's data-use terms before enabling uploads for other
@@ -149,6 +167,24 @@ needs is missing; progress inside a single requirement still counts
 proportionally. The separate ready flag answers "can I start". Five starter
 templates seed a new cabinet so the tab is not empty.
 
+### Projects suggested by the camera
+
+Identification also proposes where a part belongs. The cabinet's project names
+are added to the Gemini prompt **on the server**, never by the browser, so a
+client cannot shape the prompt, and each detection comes back with:
+
+- `projectMatch` — the name of one existing project, constrained to the list
+  that was sent. The review row pre-selects it.
+- `projectIdeas` — up to two new builds the part makes possible, each with a
+  one-line reason.
+
+The row's project dropdown offers those alongside your existing projects and a
+free-text option. On confirmation the chosen project gains a requirement for
+that part, and an accepted idea creates the project first, using its reason as
+the summary. Naming a project that already exists appends to it rather than
+creating a second one. Filing runs after the inventory is written, so a project
+deleted mid-review cannot cost you the scan.
+
 ## History
 
 Every scan, confirmation, edit, merge and stock adjustment is already recorded.
@@ -171,6 +207,7 @@ from an old visit and presented as current is worse than an error.
 | `identification_events` | What was detected versus what was confirmed, per accepted row. |
 | `inventory_adjustment_events` | Stock removals, edits and merges. |
 | `projects`, `project_parts` | A build and the parts it needs. |
+| `cabinets` | One row per owner, holding whether the cabinet is shared. |
 
 The matching key is `normalized_name + model_key`. A part with no model uses
 `__unknown__` and therefore only matches other model-unknown parts — an

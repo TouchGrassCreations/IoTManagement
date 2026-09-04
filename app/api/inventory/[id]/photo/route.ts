@@ -1,6 +1,6 @@
 import { validatePartImage } from "../../../../../lib/identification/image.ts";
 import { respond, domainErrorResponse } from "../../../../../lib/http/respond.ts";
-import { routeContext } from "../../../../../lib/http/context.ts";
+import { readContext, routeContext } from "../../../../../lib/http/context.ts";
 import type { InventoryItem, SetInventoryImageInput } from "../../../../../lib/inventory/types.ts";
 
 type ReadDependencies = { readImage: () => Promise<{ image: string | null; updatedAt: string }> };
@@ -63,7 +63,7 @@ type RouteParams = { params: Promise<{ id: string }> | { id: string } };
 export async function GET(request: Request, context: RouteParams): Promise<Response> {
   return respond("Inventory photo read", async () => {
     const [{ ownerId, db }, { getInventoryPartImage }] = await Promise.all([
-      routeContext(request),
+      readContext(request),
       import("../../../../../lib/inventory/persistence.ts"),
     ]);
     const { id } = await context.params;

@@ -56,10 +56,18 @@ export async function handleIdentifyRequest(request: Request, deps: Dependencies
 
 export async function POST(request: Request): Promise<Response> {
   return respond("Identification", async () => {
-    const { db, ownerId, env } = await routeContext(request);
+    const [{ db, ownerId, env }, { listProjectPlans }] = await Promise.all([
+      routeContext(request),
+      import("../../../lib/projects/persistence.ts"),
+    ]);
     return handleIdentifyRequest(request, {
       enforceRateLimit: () => enforceIdentificationRateLimit(ownerId, db, { env }),
-      recognize: (input) => recognizeComponents({ ...input, apiKey: env.GEMINI_API_KEY, model: env.GEMINI_MODEL }),
+      recognize: async (input) => recognizeComponents({
+        ...input,
+        apiKey: env.GEMINI_API_KEY,
+        model: env.GEMINI_MODEL,
+        projects: (await listProjectPlans(ownerId, db)).map((plan) => plan.name),
+      }),
       issueToken: () => issueConfirmationToken(env.CONFIRMATION_TOKEN_SECRET),
     });
   });

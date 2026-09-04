@@ -34,7 +34,8 @@ const jsonInit = (method: string, body: unknown): RequestInit => ({
 
 const projectUrl = (id: string) => `/api/projects/${encodeURIComponent(id)}`;
 
-export const fetchProjects = () => request<{ projects: ProjectPlan[] }>("/api/projects");
+export const fetchProjects = (owner?: string | null) =>
+  request<{ projects: ProjectPlan[] }>(owner ? `/api/projects?owner=${encodeURIComponent(owner)}` : "/api/projects");
 
 export const fetchProject = (id: string) => request<{ project: ProjectPlan }>(projectUrl(id));
 
@@ -58,3 +59,10 @@ export const fetchShoppingList = (ids?: string[]) =>
   );
 
 export const seedTemplates = () => request<TemplateSeedResult>("/api/projects/templates", { method: "POST" });
+
+export type CabinetSummary = { ownerId: string; label: string | null; visibility: "private" | "public" };
+
+export const fetchCabinet = () => request<{ cabinet: CabinetSummary }>("/api/cabinet");
+
+export const saveCabinetVisibility = (visibility: "private" | "public") =>
+  request<{ cabinet: CabinetSummary }>("/api/cabinet", jsonInit("PATCH", { visibility }));

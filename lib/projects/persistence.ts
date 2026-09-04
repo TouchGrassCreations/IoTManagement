@@ -170,7 +170,7 @@ export async function getProjectPlan(id: string, ownerId: string, db: D1Like): P
   return planProject(projectFromRow(row), requirements.get(id) ?? [], inventory);
 }
 
-function requirementStatements(projectId: string, ownerId: string, rows: RequirementInput[], db: D1Like) {
+function requirementStatements(projectId: string, ownerId: string, rows: RequirementInput[], db: D1Like, offset = 0) {
   return rows.map((row, index) =>
     db
       .prepare(
@@ -189,7 +189,7 @@ function requirementStatements(projectId: string, ownerId: string, rows: Require
         row.quantityRequired,
         row.matchMode,
         row.note,
-        index,
+        offset + index,
         projectId,
         ownerId,
       ),
@@ -296,4 +296,53 @@ export async function existingProjectNames(ownerId: string, db: D1Like): Promise
     .bind(ownerId)
     .all<{ normalized_name: string }>();
   return new Set(rows.results.map((row) => row.normalized_name));
+}
+
+/**
+ * Files a part into a project the reviewer picked during identification.
+ * Appending rather than replacing keeps the requirements the project already
+ * declares, and the position carries on from the last one.
+ */
+export async function appendProjectRequirements(
+  projectId: string,
+  rows: RequirementInput[],
+  ownerId: string,
+  db: D1Like,
+): Promise<void> {
+  if (rows.length === 0) return;
+  const last = await db
+    .prepare(
+      `SELECT COALESCE(MAX(position), -1) AS position FROM project_parts WHERE project_id IN (${OWNED_PROJECT})`,
+    )
+    .bind(projectId, ownerId)
+    .first<{ position: number }>();
+  await db.batch(requirementStatements(projectId, ownerId, rows, db, Number(last?.position ?? -1) + 1));
+}
+
+/**
+ * Returns the id of the owner's project with this name, creating it when the
+ * name is new. A repeated suggestion therefore never splits a project in two.
+ */
+export async function ensureProjectNamed(
+  name: string,
+  summary: string,
+  ownerId: string,
+  db: D1Like,
+): Promise<string> {
+  const normalized = normalizeIdentity(name);
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO projects (id,owner_id,name,normalized_name,summary,state,accent,icon,next_step)
+         VALUES (?,?,?,?,?,'planned','green',?,NULL)
+         ON CONFLICT(owner_id,normalized_name) DO NOTHING`,
+      )
+      .bind(crypto.randomUUID(), ownerId, name, normalized, summary, name.slice(0, 3).toUpperCase()),
+  ]);
+  const row = await db
+    .prepare("SELECT id FROM projects WHERE owner_id = ? AND normalized_name = ?")
+    .bind(ownerId, normalized)
+    .first<{ id: string }>();
+  if (!row) throw new ProjectNotFoundError(name);
+  return row.id;
 }

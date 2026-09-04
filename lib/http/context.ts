@@ -27,3 +27,39 @@ export async function routeEnv(): Promise<RouteEnv> {
   const { env } = await import("cloudflare:workers");
   return env as unknown as RouteEnv;
 }
+
+export type ReadContext = RouteContext & {
+  /** Null when nobody is signed in, which a public cabinet still allows. */
+  viewerId: string | null;
+  canEdit: boolean;
+};
+
+/**
+ * Resolves a read against `?owner=`. Without the parameter this is exactly
+ * `routeContext`, so an unshared cabinet still refuses an anonymous visitor.
+ */
+export async function readContext(request: Request): Promise<ReadContext> {
+  const { env } = await import("cloudflare:workers");
+  const bindings = env as unknown as RouteEnv;
+  const viewerId = viewerIdOrNull(request, bindings);
+
+  const [{ resolveReadScope }, { getCabinet }] = await Promise.all([
+    import("../cabinet/scope.ts"),
+    import("../cabinet/persistence.ts"),
+  ]);
+  const scope = await resolveReadScope({
+    target: new URL(request.url).searchParams.get("owner"),
+    viewerId,
+    loadCabinet: (ownerId) => getCabinet(ownerId, bindings.DB),
+  });
+
+  return { db: bindings.DB, env: bindings, ownerId: scope.ownerId, viewerId, canEdit: scope.canEdit };
+}
+
+function viewerIdOrNull(request: Request, env: RouteEnv): string | null {
+  try {
+    return resolveOwnerId(request.headers, env);
+  } catch {
+    return null;
+  }
+}

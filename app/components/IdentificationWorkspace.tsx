@@ -1,14 +1,16 @@
 "use client";
 /* eslint-disable @next/next/no-img-element -- object URL previews and inline crop thumbnails are local, transient images */
 import { useEffect, useRef, useState } from "react";
-import type { Detection, InventoryResult, ReviewItem } from "../../lib/identification/types.ts";
+import type { Detection, InventoryResult, ProjectIdea, ReviewItem } from "../../lib/identification/types.ts";
+import { fetchProjects } from "../../lib/projects/client.ts";
+import type { ProjectPlan } from "../../lib/projects/types.ts";
 import { INVENTORY_CATEGORIES } from "../../lib/identification/validation.ts";
 import { cropDetections, thumbnailFromFile } from "../../lib/identification/crop-client.ts";
 
 type Props = { onClose: () => void; onConfirmed: (items: InventoryResult[]) => void };
 
 function blankItem(): ReviewItem {
-  return { id: crypto.randomUUID(), accepted: true, source: "manual", name: "", model: null, category: "Sensors", quantity: 1, location: "Unsorted", image: null, boundingBox: null, confidence: null, detectedName: null, detectedModel: null, visibleMarkings: [], alternatives: [], description: "Added by hand while reviewing the photo.", tags: [] };
+  return { id: crypto.randomUUID(), accepted: true, source: "manual", name: "", model: null, category: "Sensors", quantity: 1, location: "Unsorted", image: null, boundingBox: null, confidence: null, detectedName: null, detectedModel: null, visibleMarkings: [], alternatives: [], description: "Added by hand while reviewing the photo.", tags: [], projectMatch: null, projectIdeas: [], projectId: null, newProjectName: null, projectReason: null };
 }
 
 export default function IdentificationWorkspace({ onClose, onConfirmed }: Props) {
@@ -20,7 +22,17 @@ export default function IdentificationWorkspace({ onClose, onConfirmed }: Props)
   const [error, setError] = useState("");
   const [highlighted, setHighlighted] = useState("");
   const [focusRow, setFocusRow] = useState("");
+  const [projects, setProjects] = useState<ProjectPlan[]>([]);
   const previewRef = useRef("");
+
+  // The dropdown needs the cabinet's projects whether or not a scan happens.
+  useEffect(() => {
+    let cancelled = false;
+    void fetchProjects()
+      .then((payload) => { if (!cancelled) setProjects(payload.projects); })
+      .catch(() => { /* Filing into a project is optional; the batch still saves. */ });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => { previewRef.current = preview; }, [preview]);
   useEffect(() => () => { if (previewRef.current) URL.revokeObjectURL(previewRef.current); }, []);
@@ -57,7 +69,10 @@ export default function IdentificationWorkspace({ onClose, onConfirmed }: Props)
       const crops = await cropDetections(file, detections.map((detection) => detection.boundingBox));
       setToken(data.token || "");
       setItems((current) => [
-        ...detections.map((detection, index): ReviewItem => ({ ...detection, id: `d-${index}`, accepted: true, source: "gemini", location: "Unsorted", image: crops[index] ?? null, detectedName: detection.name, detectedModel: detection.model })),
+        ...detections.map((detection, index): ReviewItem => {
+          const matched = projects.find((project) => project.name.toLowerCase() === (detection.projectMatch ?? "").toLowerCase());
+          return { ...detection, id: `d-${index}`, accepted: true, source: "gemini", location: "Unsorted", image: crops[index] ?? null, detectedName: detection.name, detectedModel: detection.model, projectId: matched?.id ?? null, newProjectName: null, projectReason: null };
+        }),
         ...current.filter((item) => item.source === "manual"),
       ]);
     } catch (failure) {
@@ -69,6 +84,22 @@ export default function IdentificationWorkspace({ onClose, onConfirmed }: Props)
 
   function patch(id: string, values: Partial<ReviewItem>) {
     setItems((current) => current.map((item) => item.id === id ? { ...item, ...values } : item));
+  }
+
+  /** One dropdown covers an existing project, one of Gemini's ideas, and your own. */
+  function projectChoice(item: ReviewItem) {
+    if (item.projectId) return `existing:${item.projectId}`;
+    if (item.newProjectName === null) return "";
+    const idea = item.projectIdeas.findIndex((candidate) => candidate.name === item.newProjectName);
+    return idea === -1 ? "custom" : `idea:${idea}`;
+  }
+
+  function chooseProject(item: ReviewItem, value: string) {
+    if (value === "") return patch(item.id, { projectId: null, newProjectName: null, projectReason: null });
+    if (value === "custom") return patch(item.id, { projectId: null, newProjectName: "", projectReason: null });
+    if (value.startsWith("existing:")) return patch(item.id, { projectId: value.slice(9), newProjectName: null, projectReason: null });
+    const idea: ProjectIdea | undefined = item.projectIdeas[Number(value.slice(5))];
+    if (idea) patch(item.id, { projectId: null, newProjectName: idea.name, projectReason: idea.reason });
   }
 
   function addManual() {
@@ -159,6 +190,17 @@ export default function IdentificationWorkspace({ onClose, onConfirmed }: Props)
               <label>Category<select value={item.category} onChange={(event) => patch(item.id, { category: event.target.value })}>{INVENTORY_CATEGORIES.map((category) => <option key={category}>{category}</option>)}</select></label>
               <label>Storage<input value={item.location} placeholder="Bin B5" onChange={(event) => patch(item.id, { location: event.target.value })} /></label>
             </div>
+            <label>Project
+              <select value={projectChoice(item)} onChange={(event) => chooseProject(item, event.target.value)}>
+                <option value="">Not part of a project</option>
+                {projects.map((project) => <option key={project.id} value={`existing:${project.id}`}>{project.name}</option>)}
+                {item.projectIdeas.map((idea, ideaIndex) => <option key={idea.name} value={`idea:${ideaIndex}`}>✨ New: {idea.name}</option>)}
+                <option value="custom">＋ New project of my own…</option>
+              </select>
+            </label>
+            {item.newProjectName !== null && <input className="new-project-name" value={item.newProjectName} placeholder="New project name" aria-label="New project name" onChange={(event) => patch(item.id, { newProjectName: event.target.value })} />}
+            {item.projectReason && <p className="project-hint">✨ {item.projectReason}</p>}
+            {item.source === "gemini" && item.projectMatch && item.projectId && <p className="project-hint">✨ Gemini thinks this belongs to {item.projectMatch}.</p>}
             {item.source === "gemini" && item.model === null && <p className="model-warning">Exact model not visible — it will be saved as model unknown.</p>}
             <button className="reject-button" onClick={() => patch(item.id, { accepted: !item.accepted })}>{item.accepted ? "Reject" : "Restore"}</button>
           </article>)}

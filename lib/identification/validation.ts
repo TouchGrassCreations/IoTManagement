@@ -1,4 +1,4 @@
-import type { Alternative, BoundingBox, ConfirmRequest, Detection, ReviewItem } from "./types.ts";
+import type { Alternative, BoundingBox, ConfirmRequest, Detection, ProjectIdea, ReviewItem } from "./types.ts";
 import { validatePartImage } from "./image.ts";
 
 const MAX_ITEMS = 50;
@@ -92,6 +92,21 @@ function alternatives(value: unknown): Alternative[] {
   });
 }
 
+/** Absent or empty ideas are normal: not every part suggests a build. */
+function projectIdeas(value: unknown): ProjectIdea[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > 3) throw new Error("projectIdeas is invalid");
+  return value.map((candidate) => {
+    const raw = object(candidate);
+    const reason = raw.reason === undefined || raw.reason === null || raw.reason === "";
+    return { name: text(raw.name, "project idea name"), reason: reason ? "" : text(raw.reason, "project idea reason", 300) };
+  });
+}
+
+function optionalText(value: unknown, field: string, max = 120): string | null {
+  return value === undefined || value === null || value === "" ? null : text(value, field, max);
+}
+
 function detection(value: unknown): Detection {
   const raw = object(value);
   const quantity = Number(raw.quantity);
@@ -110,6 +125,8 @@ function detection(value: unknown): Detection {
     alternatives: alternatives(raw.alternatives),
     description: text(raw.description, "Description", 500),
     tags: strings(raw.tags, "tags"),
+    projectMatch: optionalText(raw.projectMatch, "projectMatch"),
+    projectIdeas: projectIdeas(raw.projectIdeas),
   };
 }
 
@@ -137,6 +154,9 @@ function reviewItem(raw: unknown): ReviewItem[] {
   });
   const fromGemini = row.source === "gemini";
   const unset = row.location === undefined || row.location === null || row.location === "";
+  const projectId = optionalText(row.projectId, "Project", 64);
+  const newProjectName = optionalText(row.newProjectName, "New project name");
+  if (projectId && newProjectName) throw new Error("Choose either an existing project or a new one");
 
   return [{
     ...base,
@@ -149,6 +169,9 @@ function reviewItem(raw: unknown): ReviewItem[] {
     detectedModel: fromGemini ? nullableText(row.detectedModel ?? row.model, "Detected model") : null,
     location: unset ? "Unsorted" : text(row.location, "Storage location"),
     image: validatePartImage(row.image),
+    projectId,
+    newProjectName,
+    projectReason: optionalText(row.projectReason, "Project reason", 300),
   }];
 }
 

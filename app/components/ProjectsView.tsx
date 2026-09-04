@@ -29,7 +29,14 @@ function shortfallLabel(match: RequirementMatch): string {
   return `${match.missing} × ${name}`;
 }
 
-export default function ProjectsView() {
+type ProjectsViewProps = {
+  /** Set when viewing a shared cabinet; omitted for your own. */
+  owner?: string | null;
+  canEdit?: boolean;
+  refreshToken?: number;
+};
+
+export default function ProjectsView({ owner = null, canEdit = true, refreshToken = 0 }: ProjectsViewProps) {
   const [projects, setProjects] = useState<ProjectPlan[]>([]);
   const [shopping, setShopping] = useState<ShoppingList>(EMPTY_LIST);
   const [loading, setLoading] = useState(true);
@@ -55,9 +62,12 @@ export default function ProjectsView() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [planned, list] = await Promise.all([fetchProjects(), fetchShoppingList()]);
+      const [planned, list] = await Promise.all([
+        fetchProjects(owner),
+        canEdit ? fetchShoppingList() : Promise.resolve(null),
+      ]);
       setProjects(planned.projects);
-      setShopping(list);
+      if (list) setShopping(list);
       setError("");
       setSignInRequired(false);
     } catch (failure) {
@@ -65,13 +75,13 @@ export default function ProjectsView() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [owner, canEdit]);
 
   useEffect(() => {
     // Deferred a tick so the fetch's first setState lands outside the effect body.
     const start = window.setTimeout(() => void load(), 0);
     return () => window.clearTimeout(start);
-  }, [load]);
+  }, [load, refreshToken]);
 
   async function saveProject(draft: ProjectDraft) {
     setSaving(true);
@@ -154,14 +164,14 @@ export default function ProjectsView() {
           <span>·</span>
           <strong>{buildable}</strong> ready to build
         </div>
-        <div className="projects-actions">
+        {canEdit && <div className="projects-actions">
           <button type="button" className="ghost-button" onClick={() => void addStarters()} disabled={seeding}>
             {seeding ? "Adding…" : "Add starter projects"}
           </button>
           <button type="button" className="hero-camera-button" onClick={() => { setEditing(null); setEditorError(""); setEditorOpen(true); }}>
             <span aria-hidden="true">＋</span> New project
           </button>
-        </div>
+        </div>}
       </div>
 
       {error && <p className="inventory-message error" role="alert">{error} <button type="button" onClick={() => void load()}>Retry</button></p>}
@@ -203,12 +213,12 @@ export default function ProjectsView() {
                       : "Every part is in the cabinet."}
                   </p>
                 )}
-                <div className="project-card-actions">
+                {canEdit && <div className="project-card-actions">
                   <button type="button" onClick={() => { setEditing(project); setEditorError(""); setEditorOpen(true); }}>
                     Edit project <span aria-hidden="true">→</span>
                   </button>
                   <button type="button" className="delete-project" onClick={() => setDeleting(project)}>Delete</button>
-                </div>
+                </div>}
               </div>
             </article>
           );
@@ -217,10 +227,10 @@ export default function ProjectsView() {
         {projects.length === 0 && !loading && (
           <div className="empty">
             <strong>No projects yet</strong>
-            <p>Start from the five builds this cabinet was designed around, or describe your own.</p>
-            <button type="button" className="empty-camera-button" onClick={() => void addStarters()} disabled={seeding}>
+            <p>{canEdit ? "Start from the five builds this cabinet was designed around, or describe your own." : "This cabinet has no projects yet."}</p>
+            {canEdit && <button type="button" className="empty-camera-button" onClick={() => void addStarters()} disabled={seeding}>
               {seeding ? "Adding…" : "Add starter projects"}
-            </button>
+            </button>}
           </div>
         )}
       </div>

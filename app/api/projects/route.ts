@@ -1,5 +1,5 @@
 import { respond } from "../../../lib/http/respond.ts";
-import { routeContext } from "../../../lib/http/context.ts";
+import { readContext, routeContext } from "../../../lib/http/context.ts";
 import { parseProjectCreate } from "../../../lib/projects/validation.ts";
 import type { CreateProjectInput, ProjectPlan } from "../../../lib/projects/types.ts";
 
@@ -22,7 +22,7 @@ export async function handleProjectCreate(request: Request, deps: Pick<Dependenc
 export async function GET(request: Request): Promise<Response> {
   return respond("Project list", async () => {
     const [{ ownerId, db }, { listProjectPlans }] = await Promise.all([
-      routeContext(request),
+      readContext(request),
       import("../../../lib/projects/persistence.ts"),
     ]);
     return handleProjectList({ list: () => listProjectPlans(ownerId, db) });

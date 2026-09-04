@@ -32,7 +32,15 @@ function symbolFor(name: string): string {
   return name.slice(0, 3).toUpperCase();
 }
 
-export default function InventoryView({ refreshToken, onIdentify }: { refreshToken: number; onIdentify: () => void }) {
+type InventoryViewProps = {
+  refreshToken: number;
+  onIdentify: () => void;
+  /** Set when viewing a shared cabinet; omitted for your own. */
+  owner?: string | null;
+  canEdit?: boolean;
+};
+
+export default function InventoryView({ refreshToken, onIdentify, owner = null, canEdit = true }: InventoryViewProps) {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [summary, setSummary] = useState<InventorySummary>(EMPTY_SUMMARY);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -81,8 +89,8 @@ export default function InventoryView({ refreshToken, onIdentify }: { refreshTok
     setLoading(true);
     try {
       const [page, totals] = await Promise.all([
-        fetchInventory({ search, category, location, sort }),
-        fetchSummary(),
+        fetchInventory({ owner, search, category, location, sort }),
+        fetchSummary(owner),
       ]);
       attempt.apply(() => {
         setItems(page.items);
@@ -96,7 +104,7 @@ export default function InventoryView({ refreshToken, onIdentify }: { refreshTok
     } finally {
       setLoading(false);
     }
-  }, [search, category, location, sort]);
+  }, [owner, search, category, location, sort]);
 
   useEffect(() => {
     const controller = removalController.current;
@@ -112,7 +120,7 @@ export default function InventoryView({ refreshToken, onIdentify }: { refreshTok
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
     try {
-      const page = await fetchInventory({ search, category, location, sort, cursor: nextCursor });
+      const page = await fetchInventory({ owner, search, category, location, sort, cursor: nextCursor });
       setItems((current) => {
         const known = new Set(current.map((item) => item.id));
         return [...current, ...page.items.filter((item) => !known.has(item.id))];
@@ -141,6 +149,17 @@ export default function InventoryView({ refreshToken, onIdentify }: { refreshTok
     if (photoInput.current) {
       photoInput.current.value = "";
       photoInput.current.click();
+    }
+  }
+
+  async function clearPhoto(id: string) {
+    try {
+      const { item } = await savePartPhoto(id, null);
+      setItems((current) => current.map((entry) => (entry.id === item.id ? item : entry)));
+      setSummary((current) => ({ ...current, photographed: Math.max(0, current.photographed - 1) }));
+      setError("");
+    } catch (failure) {
+      reportError(failure, "The photo could not be removed.");
     }
   }
 
@@ -287,10 +306,10 @@ export default function InventoryView({ refreshToken, onIdentify }: { refreshTok
           <p className="eyebrow">POINT YOUR CAMERA AT THE PILE</p>
           <h1>Photograph it.<br /><em>It&rsquo;s catalogued.</em></h1>
           <p className="hero-copy">One photo identifies every board, sensor, and mystery module in the frame, crops a picture of each part, and files it in your cabinet.</p>
-          <div className="hero-actions">
+          {canEdit && <div className="hero-actions">
             <button className="hero-camera-button" onClick={onIdentify}><span aria-hidden="true">◉</span> Identify with camera</button>
             <span className="hero-hint">Camera or uploaded photo · review every result before it is saved</span>
-          </div>
+          </div>}
         </div>
         <div className="hero-stats" aria-label="Inventory overview">
           <div><strong>{summary.totalTypes}</strong><span>types catalogued</span></div>
@@ -310,13 +329,13 @@ export default function InventoryView({ refreshToken, onIdentify }: { refreshTok
             {SORT_LABELS.map((entry) => <option key={entry.value} value={entry.value}>{entry.label}</option>)}
           </select>
         </label>
-        <div className="file-controls">
+        {canEdit && <div className="file-controls">
           <a className="file-button" href="/api/inventory/export" download>Export CSV</a>
           <button type="button" className="file-button" onClick={openCsvPicker} disabled={importing}>
             {importing ? "Importing…" : "Import CSV"}
           </button>
-        </div>
-        <button className="add-button" onClick={onIdentify}><span aria-hidden="true">◉</span> Identify &amp; catalogue</button>
+        </div>}
+        {canEdit && <button className="add-button" onClick={onIdentify}><span aria-hidden="true">◉</span> Identify &amp; catalogue</button>}
       </section>
 
       <section className="inventory-layout">
@@ -346,12 +365,12 @@ export default function InventoryView({ refreshToken, onIdentify }: { refreshTok
             </>
           )}
 
-          <div className="identify-card">
+          {canEdit && <div className="identify-card">
             <span className="identify-icon">◉</span>
             <h3>Every part starts with a photo</h3>
             <p>Snap the whole handful at once. Gemini names each one, you review, and each part keeps its own cropped picture.</p>
             <button onClick={onIdentify}>Open the camera →</button>
-          </div>
+          </div>}
         </aside>
 
         <div className="parts-panel">
@@ -374,9 +393,11 @@ export default function InventoryView({ refreshToken, onIdentify }: { refreshTok
               return (
                 <article className="part-card" key={part.id}>
                   <div className={`part-visual purple ${part.hasImage ? "has-photo" : ""}`}>
-                    {part.hasImage ? <img src={partPhotoUrl(part)} alt={part.name} loading="lazy" /> : <span>{symbolFor(part.name)}</span>}
+                    {part.hasImage ? <img src={partPhotoUrl(part, owner)} alt={part.name} loading="lazy" /> : <span>{symbolFor(part.name)}</span>}
                     <small>{part.code}</small>
-                    {!part.hasImage && <button type="button" className="attach-photo-button" onClick={() => openPhotoPicker(part.id)}>＋ Add photo</button>}
+                    {canEdit && (part.hasImage
+                      ? <button type="button" className="attach-photo-button" onClick={() => void clearPhoto(part.id)} aria-label={`Remove the photo of ${part.name}`}>Remove photo</button>
+                      : <button type="button" className="attach-photo-button" onClick={() => openPhotoPicker(part.id)}>＋ Add photo</button>)}
                   </div>
                   <div className="part-body">
                     <div className="part-top"><span>{part.category}</span><strong>×{part.quantity}</strong></div>
@@ -397,8 +418,8 @@ export default function InventoryView({ refreshToken, onIdentify }: { refreshTok
                             Datasheet
                           </a>
                         )}
-                        <button type="button" className="edit-part-button" onClick={() => { setEditItem(part); setEditError(""); }} aria-label={`Edit ${part.name}`}>Edit</button>
-                        <button
+                        {canEdit && <button type="button" className="edit-part-button" onClick={() => { setEditItem(part); setEditError(""); }} aria-label={`Edit ${part.name}`}>Edit</button>}
+                        {canEdit && <button
                           ref={(element) => { if (element) removalOpeners.current.set(part.id, element); else removalOpeners.current.delete(part.id); }}
                           type="button"
                           className="remove-part-button"
@@ -407,7 +428,7 @@ export default function InventoryView({ refreshToken, onIdentify }: { refreshTok
                           aria-label={`Remove ${part.name} from inventory`}
                         >
                           Remove
-                        </button>
+                        </button>}
                       </span>
                     </footer>
                   </div>
@@ -419,7 +440,7 @@ export default function InventoryView({ refreshToken, onIdentify }: { refreshTok
               <div className="empty">
                 <strong>No parts found</strong>
                 <p>{summary.totalTypes === 0 ? "Photograph your first handful of components to fill the cabinet." : "Try a different search, bin, or category."}</p>
-                {summary.totalTypes === 0 && <button type="button" className="empty-camera-button" onClick={onIdentify}>◉ Identify with camera</button>}
+                {summary.totalTypes === 0 && canEdit && <button type="button" className="empty-camera-button" onClick={onIdentify}>◉ Identify with camera</button>}
               </div>
             )}
           </div>
@@ -432,7 +453,7 @@ export default function InventoryView({ refreshToken, onIdentify }: { refreshTok
         </div>
       </section>
 
-      <input
+      {canEdit && <input
         ref={photoInput}
         className="hidden-photo-input"
         type="file"
@@ -441,9 +462,9 @@ export default function InventoryView({ refreshToken, onIdentify }: { refreshTok
         aria-hidden="true"
         tabIndex={-1}
         onChange={(event) => void attachPhoto(event.target.files?.[0] || null)}
-      />
+      />}
 
-      <input
+      {canEdit && <input
         ref={csvInput}
         className="hidden-photo-input"
         type="file"
@@ -451,7 +472,7 @@ export default function InventoryView({ refreshToken, onIdentify }: { refreshTok
         aria-hidden="true"
         tabIndex={-1}
         onChange={(event) => void importCsv(event.target.files?.[0] || null)}
-      />
+      />}
 
       {editItem && (
         <EditPartDialog

@@ -142,3 +142,15 @@ export const identificationRateLimits = sqliteTable(
     index("idx_identification_rate_limits_expiry").on(table.expiresAt),
   ],
 );
+
+export const cabinets = sqliteTable(
+  "cabinets",
+  {
+    ownerId: text("owner_id").primaryKey(),
+    label: text("label"),
+    visibility: text("visibility").notNull().default("private"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [index("idx_cabinets_visibility").on(table.visibility)],
+);

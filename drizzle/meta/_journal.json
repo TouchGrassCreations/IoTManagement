@@ -50,6 +50,13 @@
       "when": 1787760000000,
       "tag": "0006_rate_limits",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1788000000000,
+      "tag": "0007_cabinet_sharing",
+      "breakpoints": true
     }
   ]
 }

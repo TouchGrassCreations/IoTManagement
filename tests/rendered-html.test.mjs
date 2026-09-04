@@ -38,11 +38,36 @@ test("leads the catalogue with camera identification", async () => {
   const inventorySource = await source("app/components/InventoryView.tsx");
   assert.doesNotMatch(inventorySource, /handleInventoryCreate|isAdding/);
   assert.match(inventorySource, /attach-photo-button/);
-  assert.match(inventorySource, /part\.hasImage \? <img src=\{partPhotoUrl\(part\)\}/);
+  assert.match(inventorySource, /part\.hasImage \? <img src=\{partPhotoUrl\(part, owner\)\}/);
 
   const workspaceSource = await source("app/components/IdentificationWorkspace.tsx");
   assert.match(workspaceSource, /cropDetections/);
   assert.match(workspaceSource, /Add a part by hand instead/);
+});
+
+test("a part photo can be removed, and a shared cabinet cannot be edited", async () => {
+  const inventorySource = await source("app/components/InventoryView.tsx");
+  assert.match(inventorySource, /Remove photo/);
+  assert.match(inventorySource, /savePartPhoto\(id, null\)/);
+  // Every mutating control is behind the owner check.
+  for (const control of [/canEdit && <button className="add-button"/, /\{canEdit && \(part\.hasImage/, /canEdit && <div className="file-controls"/]) {
+    assert.match(inventorySource, control);
+  }
+  const projectsSource = await source("app/components/ProjectsView.tsx");
+  assert.match(projectsSource, /canEdit && <div className="projects-actions"/);
+  const sharedSource = await source("app/components/SharedCabinetView.tsx");
+  assert.match(sharedSource, /canEdit=\{false\}/);
+});
+
+test("the camera suggests projects for what it identifies", async () => {
+  const workspaceSource = await source("app/components/IdentificationWorkspace.tsx");
+  assert.match(workspaceSource, /projectIdeas/);
+  assert.match(workspaceSource, /New project of my own/);
+  assert.match(workspaceSource, /fetchProjects/);
+  // The cabinet's project names reach Gemini from the server, never the client.
+  const routeSource = await source("app/api/identify/route.ts");
+  assert.match(routeSource, /listProjectPlans/);
+  assert.doesNotMatch(workspaceSource, /promptFor/);
 });
 
 test("renders the persistent inventory and removal contracts", async () => {

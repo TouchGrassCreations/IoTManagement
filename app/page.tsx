@@ -5,6 +5,7 @@ import HistoryView from "./components/HistoryView";
 import IdentificationWorkspace from "./components/IdentificationWorkspace";
 import InventoryView from "./components/InventoryView";
 import ProjectsView from "./components/ProjectsView";
+import ShareCabinetBar from "./components/ShareCabinetBar";
 
 const nav = ["Inventory", "Projects", "History"] as const;
 
@@ -34,10 +35,12 @@ export default function Home() {
         </div>
       </header>
 
+      <ShareCabinetBar />
+
       {view === "Inventory" && (
         <InventoryView refreshToken={refreshToken} onIdentify={() => setIsIdentifying(true)} />
       )}
-      {view === "Projects" && <ProjectsView />}
+      {view === "Projects" && <ProjectsView refreshToken={refreshToken} />}
       {view === "History" && <HistoryView refreshToken={refreshToken} />}
 
       {isIdentifying && (

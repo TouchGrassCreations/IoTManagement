@@ -1,5 +1,7 @@
 export type BoundingBox = { top: number; left: number; width: number; height: number };
 export type Alternative = { name: string; model: string | null };
+/** A build the model thinks this part makes possible. */
+export type ProjectIdea = { name: string; reason: string };
 export type Detection = {
   name: string;
   model: string | null;
@@ -11,6 +13,9 @@ export type Detection = {
   alternatives: Alternative[];
   description: string;
   tags: string[];
+  /** An existing project name, copied from the list the server supplied. */
+  projectMatch: string | null;
+  projectIdeas: ProjectIdea[];
 };
 export type ReviewItem = Omit<Detection, "boundingBox" | "confidence"> & {
   id: string;
@@ -23,6 +28,10 @@ export type ReviewItem = Omit<Detection, "boundingBox" | "confidence"> & {
   detectedModel: string | null;
   location: string;
   image: string | null;
+  /** Exactly one of these is set once the reviewer picks a project. */
+  projectId: string | null;
+  newProjectName: string | null;
+  projectReason: string | null;
 };
 export type ConfirmRequest = { token: string; items: ReviewItem[] };
 export type InventoryResult = {

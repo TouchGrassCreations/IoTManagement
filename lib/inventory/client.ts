@@ -24,6 +24,8 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export type InventoryListParams = {
+  /** Set when reading someone else's shared cabinet rather than your own. */
+  owner?: string | null;
   search?: string;
   category?: string | null;
   location?: string | null;
@@ -34,6 +36,7 @@ export type InventoryListParams = {
 
 export function inventoryListUrl(params: InventoryListParams): string {
   const search = new URLSearchParams();
+  if (params.owner) search.set("owner", params.owner);
   if (params.search) search.set("search", params.search);
   if (params.category) search.set("category", params.category);
   if (params.location) search.set("location", params.location);
@@ -45,13 +48,15 @@ export function inventoryListUrl(params: InventoryListParams): string {
 }
 
 /** Thumbnails are versioned by `updatedAt`, so a changed photo busts the cache. */
-export function partPhotoUrl(item: Pick<InventoryItem, "id" | "updatedAt">): string {
-  return `/api/inventory/${encodeURIComponent(item.id)}/photo?v=${encodeURIComponent(item.updatedAt)}`;
+export function partPhotoUrl(item: Pick<InventoryItem, "id" | "updatedAt">, owner?: string | null): string {
+  const scope = owner ? `&owner=${encodeURIComponent(owner)}` : "";
+  return `/api/inventory/${encodeURIComponent(item.id)}/photo?v=${encodeURIComponent(item.updatedAt)}${scope}`;
 }
 
 export const fetchInventory = (params: InventoryListParams) => request<InventoryPage>(inventoryListUrl(params));
 
-export const fetchSummary = () => request<InventorySummary>("/api/inventory/summary");
+export const fetchSummary = (owner?: string | null) =>
+  request<InventorySummary>(owner ? `/api/inventory/summary?owner=${encodeURIComponent(owner)}` : "/api/inventory/summary");
 
 const jsonInit = (method: string, body: unknown): RequestInit => ({
   method,
@@ -59,6 +64,7 @@ const jsonInit = (method: string, body: unknown): RequestInit => ({
   body: JSON.stringify(body),
 });
 
+/** Passing null clears the stored crop without deleting the part. */
 export const savePartPhoto = (id: string, image: string | null) =>
   request<{ item: InventoryItem }>(`/api/inventory/${encodeURIComponent(id)}/photo`, jsonInit("POST", { image }));
 
