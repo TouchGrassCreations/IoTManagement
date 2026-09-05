@@ -1,65 +1,32 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
+import { migrationFiles as filesIn, statementsIn as statementsFrom } from "../../lib/db/migrations.ts";
+import { createDatabaseAdapter } from "../../lib/db/sqlite.ts";
 
 /**
- * A D1-shaped adapter over node:sqlite, so persistence tests exercise the real
- * SQL — indexes, ON CONFLICT clauses and conditional guards included — instead
- * of asserting against a hand-written stub.
+ * Test fixtures over the production SQLite adapter, so persistence tests
+ * exercise the real SQL — indexes, ON CONFLICT clauses and conditional guards
+ * included — through the same adapter a container runs.
  */
 
-const MIGRATION_DIRECTORY = new URL("../../drizzle/", import.meta.url);
+const MIGRATION_DIRECTORY = fileURLToPath(new URL("../../drizzle/", import.meta.url));
 
 export function migrationFiles() {
-  return readdirSync(MIGRATION_DIRECTORY)
-    .filter((file) => file.endsWith(".sql"))
-    .sort();
+  return filesIn(MIGRATION_DIRECTORY);
 }
 
 export function statementsIn(file) {
-  return readFileSync(new URL(file, MIGRATION_DIRECTORY), "utf8")
-    .split("--> statement-breakpoint")
-    .map((statement) => statement.trim())
-    .filter(Boolean);
+  return statementsFrom(MIGRATION_DIRECTORY, file);
 }
 
+/** Unjournalled, so a test can apply an arbitrary subset in order. */
 export function migrate(db, files = migrationFiles()) {
   for (const file of files) {
     for (const statement of statementsIn(file)) db.exec(statement);
   }
 }
 
-function normalize(value) {
-  if (value === undefined || value === null) return null;
-  if (typeof value === "boolean") return value ? 1 : 0;
-  return value;
-}
-
-export function d1(db) {
-  return {
-    prepare(sql) {
-      const statement = (values) => ({
-        statement: sql,
-        values,
-        bind: (...next) => statement(next.map(normalize)),
-        first: async () => db.prepare(sql).get(...values) ?? null,
-        all: async () => ({ results: db.prepare(sql).all(...values) }),
-        run: () => ({ meta: { changes: db.prepare(sql).run(...values).changes } }),
-      });
-      return statement([]);
-    },
-    async batch(statements) {
-      db.exec("BEGIN");
-      try {
-        const results = statements.map((entry) => entry.run());
-        db.exec("COMMIT");
-        return results;
-      } catch (error) {
-        db.exec("ROLLBACK");
-        throw error;
-      }
-    },
-  };
-}
+export const d1 = createDatabaseAdapter;
 
 /** A migrated in-memory database plus its D1 adapter. */
 export function createDatabase() {
