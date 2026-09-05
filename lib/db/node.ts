@@ -60,6 +60,7 @@ export function nodeBindings(): RouteEnv {
   return {
     DB: nodeDatabase(),
     ANONYMOUS_OWNER_ID: setting(process.env.ANONYMOUS_OWNER_ID),
+    TRUSTED_PROXY_SECRET: setting(process.env.TRUSTED_PROXY_SECRET),
     CONFIRMATION_TOKEN_SECRET: setting(process.env.CONFIRMATION_TOKEN_SECRET),
     GEMINI_API_KEY: setting(process.env.GEMINI_API_KEY),
     GEMINI_MODEL: setting(process.env.GEMINI_MODEL),

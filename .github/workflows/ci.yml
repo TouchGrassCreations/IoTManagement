@@ -43,6 +43,7 @@ jobs:
     timeout-minutes: 20
     env:
       SECRET: a-confirmation-secret-for-ci
+      TRUSTED_PROXY_SECRET: a-proxy-secret-for-ci
     steps:
       - uses: actions/checkout@v5
 
@@ -105,8 +106,50 @@ jobs:
             && { echo "migrations ran twice against the same volume"; docker logs cabinet; exit 1; }
           exit 0
 
-      - name: The compose file is valid, and refuses to start without a secret
+      # The deployment's trust boundary: the proxy strips what a client claims
+      # and the app refuses identity that did not come through the proxy.
+      # Neither half is any use alone, so both are exercised together.
+      - name: A visitor cannot become somebody else
         run: |
+          docker rm -f cabinet
+          docker volume rm -f cabinet-data
+          docker run -d --name cabinet -p 3000:3000 \
+            -e CONFIRMATION_TOKEN_SECRET="$SECRET" \
+            -e TRUSTED_PROXY_SECRET \
+            -v cabinet-data:/data \
+            parts-cabinet:ci
+          .github/scripts/wait-for-cabinet.sh || { docker logs cabinet; exit 1; }
+
+          node .github/scripts/stub-identity-provider.mjs &
+          echo $! > /tmp/stub.pid
+
+          docker run -d --name caddy --network host \
+            -e CABINET_DOMAIN=http://localhost:8080 \
+            -e ACME_EMAIL=ci@example.test \
+            -e TRUSTED_PROXY_SECRET \
+            -e OAUTH_UPSTREAM=127.0.0.1:4180 \
+            -e CABINET_UPSTREAM=127.0.0.1:3000 \
+            -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            --entrypoint caddy caddy:2-alpine \
+            run --config /etc/caddy/Caddyfile --adapter caddyfile
+          .github/scripts/wait-for-cabinet.sh http://localhost:8080/ || { docker logs caddy; exit 1; }
+
+          .github/scripts/check-proxy-identity.sh || { docker logs caddy; docker logs cabinet; exit 1; }
+          kill "$(cat /tmp/stub.pid)" 2>/dev/null || true
+
+      - name: The compose file is valid, and refuses to start without a secret
+        env:
+          CABINET_DOMAIN: cabinet.example
+          ACME_EMAIL: ci@example.test
+          OAUTH_CLIENT_ID: client-id
+          OAUTH_CLIENT_SECRET: client-secret
+          OAUTH_COOKIE_SECRET: cookie-secret
+        run: |
+          docker run --rm -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            -e CABINET_DOMAIN -e ACME_EMAIL -e TRUSTED_PROXY_SECRET \
+            --entrypoint caddy caddy:2-alpine \
+            validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
           CONFIRMATION_TOKEN_SECRET="$SECRET" docker compose config --quiet
           if docker compose config --quiet 2>/dev/null; then
             echo "compose should refuse an unset CONFIRMATION_TOKEN_SECRET"; exit 1
@@ -114,4 +157,6 @@ jobs:
 
       - name: Container logs
         if: failure()
-        run: docker logs cabinet 2>&1 || true
+        run: |
+          docker logs cabinet 2>&1 || true
+          docker logs caddy 2>&1 || true

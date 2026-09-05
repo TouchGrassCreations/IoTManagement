@@ -190,9 +190,40 @@ what injects the identity headers `lib/auth/owner.ts` reads.
 
 ### Docker
 
+`docker-compose.yml` brings up three services: Caddy terminating TLS,
+oauth2-proxy holding the sign-in session, and the cabinet itself. Only Caddy
+publishes ports — the app is reachable only through it.
+
 ```bash
-cp .env.example .env          # CONFIRMATION_TOKEN_SECRET, GEMINI_API_KEY, ANONYMOUS_OWNER_ID
+cp .env.example .env          # see below, then chmod 600 .env
 docker compose up --build
+```
+
+Point `CABINET_DOMAIN` at a hostname that resolves to this machine and leave
+ports 80 and 443 reachable; Caddy takes a certificate from Let's Encrypt on
+first start and renews it itself. Register the OAuth client with your provider
+using `https://<CABINET_DOMAIN>/oauth2/callback` as the redirect URI.
+
+| Variable | Purpose |
+| --- | --- |
+| `CABINET_DOMAIN` | Hostname the certificate is issued for. |
+| `ACME_EMAIL` | Let's Encrypt account address. |
+| `TRUSTED_PROXY_SECRET` | Shared between Caddy and the app. `openssl rand -hex 32`. |
+| `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET` | From your identity provider. |
+| `OAUTH_COOKIE_SECRET` | `openssl rand -base64 32`. Rotating it signs everyone out. |
+| `OAUTH_EMAIL_DOMAIN` | Who may sign in. `*` admits anyone the provider authenticates. |
+
+Every visitor's scans spend **your** Gemini budget, so `OAUTH_EMAIL_DOMAIN=*`
+opens your bill to anyone with an account. The per-owner identification limits
+cap the damage but do not stop it; restrict the domain, or keep the
+`IDENTIFY_RATE_LIMIT_*` values low.
+
+To run the cabinet alone, without TLS or sign-in — a private machine, or a
+first look — start just that service and publish its port:
+
+```bash
+docker compose run --rm --service-ports \
+  -e ANONYMOUS_OWNER_ID=me -e TRUSTED_PROXY_SECRET= parts-cabinet
 ```
 
 The image is a two-stage build: the toolchain compiles `output: "standalone"`
@@ -233,18 +264,33 @@ does not take out the other, and restrict each key to the Generative Language
 API in Google AI Studio. The key never reaches the browser: identification runs
 in a route handler, so only the server ever holds it.
 
-#### Authentication is yours to supply
+#### How sign-in works, and why it cannot be forged
 
-Off the Sites platform nothing injects `oai-authenticated-user-id`, so owner
-resolution falls to `ANONYMOUS_OWNER_ID` — one cabinet shared by everyone who
-can reach the port — or refuses with a `401`. That is correct for a private,
-single-user deployment behind a firewall or a VPN, and wrong anywhere else.
+Off the Sites platform nothing injects `oai-authenticated-user-id`, so the
+proxy stack supplies it. A request arrives, and:
 
-For real accounts, put an authenticating proxy in front (oauth2-proxy,
-Authelia, Cloudflare Access, Tailscale) and have it set
-`oai-authenticated-user-id` to a stable per-user id, leaving `ANONYMOUS_OWNER_ID`
-unset. The proxy **must strip any copy of that header it receives from the
-client**, or a visitor can send it themselves and read anyone's cabinet.
+1. **Caddy deletes the identity headers first**, unconditionally, before any
+   other handler runs. A visitor who sets `oai-authenticated-user-id` on their
+   own request has it thrown away rather than honoured.
+2. **oauth2-proxy is asked whether this session is signed in.** If it is not,
+   a page is redirected to sign in and an API call gets a `401` saying so —
+   rather than a redirect a `fetch` would follow and fail to parse.
+3. **Caddy copies the identity from the auth response** onto the request, and
+   adds `X-Cabinet-Proxy-Secret`.
+4. **The app honours the identity only because that secret is present.**
+   `TRUSTED_PROXY_SECRET` is what makes this hold: without it the app would
+   trust the header from anyone who could open a socket to the container, and
+   a published port, a second container, or a forwarded port would each be a
+   way around the proxy.
+
+Steps 1 and 4 are independent on purpose. Stripping alone does nothing for a
+request that never passes through Caddy; the secret alone does nothing if the
+proxy forwards a forged header beside its own. `.github/scripts/check-proxy-identity.sh`
+asserts both on every pull request, by trying the forgery three ways and
+checking which owner the rows actually landed under.
+
+Leave `ANONYMOUS_OWNER_ID` **unset** behind the proxy. Every visitor has a real
+identity there, and a value would collapse them all into one shared cabinet.
 
 ### A plain Node process
 
