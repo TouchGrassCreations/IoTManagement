@@ -34,3 +34,84 @@ jobs:
       - run: npm run test:unit
 
       - run: npm run build
+
+  image:
+    name: Build and run the container
+    runs-on: ubuntu-latest
+    # Independent of `verify`: a broken image should be distinguishable from a
+    # failing test at a glance, and neither needs to wait for the other.
+    timeout-minutes: 20
+    env:
+      SECRET: a-confirmation-secret-for-ci
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: parts-cabinet:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Building proves nothing about booting: the image that could not find
+      # `react` built cleanly and died on its first line of JavaScript.
+      - name: It boots and serves
+        run: |
+          docker run -d --name cabinet -p 3000:3000 \
+            -e CONFIRMATION_TOKEN_SECRET="$SECRET" \
+            -e ANONYMOUS_OWNER_ID=continuous-integration \
+            -v cabinet-data:/data \
+            parts-cabinet:ci
+          .github/scripts/wait-for-cabinet.sh || { docker logs cabinet; exit 1; }
+
+      - name: The healthcheck agrees
+        run: |
+          for _ in $(seq 1 24); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' cabinet)
+            [ "$status" = healthy ] && exit 0
+            [ "$status" = unhealthy ] && { docker logs cabinet; exit 1; }
+            sleep 5
+          done
+          echo "the healthcheck never reported healthy"; docker logs cabinet; exit 1
+
+      - name: A write reaches the database on the volume
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:3000/api/projects \
+            -H 'content-type: application/json' \
+            -d '{"name":"Continuous integration","description":"","parts":[]}')
+          [ "$code" = 201 ] || { echo "expected 201, got $code"; docker logs cabinet; exit 1; }
+          docker logs cabinet 2>&1 | grep -q 'applied .* migration' \
+            || { echo "the first query should have migrated an empty volume"; docker logs cabinet; exit 1; }
+
+      # The realistic failure is a redeploy, not a restart: a new container
+      # meeting a volume that already has the schema. Unjournalled, the bare
+      # CREATE TABLE in migration 0000 takes it down on the first request.
+      - name: A replacement container keeps the data and re-runs no migrations
+        run: |
+          docker rm -f cabinet
+          docker run -d --name cabinet -p 3000:3000 \
+            -e CONFIRMATION_TOKEN_SECRET="$SECRET" \
+            -e ANONYMOUS_OWNER_ID=continuous-integration \
+            -v cabinet-data:/data \
+            parts-cabinet:ci
+          .github/scripts/wait-for-cabinet.sh || { docker logs cabinet; exit 1; }
+          curl -fsS http://localhost:3000/api/projects | grep -q 'Continuous integration' \
+            || { echo "the project did not survive the replacement"; docker logs cabinet; exit 1; }
+          docker logs cabinet 2>&1 | grep -q 'applied .* migration' \
+            && { echo "migrations ran twice against the same volume"; docker logs cabinet; exit 1; }
+          exit 0
+
+      - name: The compose file is valid, and refuses to start without a secret
+        run: |
+          CONFIRMATION_TOKEN_SECRET="$SECRET" docker compose config --quiet
+          if docker compose config --quiet 2>/dev/null; then
+            echo "compose should refuse an unset CONFIRMATION_TOKEN_SECRET"; exit 1
+          fi
+
+      - name: Container logs
+        if: failure()
+        run: docker logs cabinet 2>&1 || true

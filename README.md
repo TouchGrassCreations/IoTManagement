@@ -162,6 +162,68 @@ service worker caches build assets by content hash and the app shell
 network-first; it never caches anything under `/api`, because inventory served
 from an old visit and presented as current is worse than an error.
 
+## Deploying
+
+The app runs on two targets from one build. Which one it is on is decided at
+runtime, not at build time: `lib/http/context.ts` asks for `cloudflare:workers`
+and takes the answer, or falls back to the process environment and a local
+SQLite file when that module does not exist.
+
+### Cloudflare, through the Sites platform
+
+`.openai/hosting.json` binds this repository to a Site, and `npm run build`
+packages `dist/.openai/` — the hosting config and every migration in `drizzle/`
+— for the platform to apply. Deploy from the Site, not from here. This is the
+only target where ChatGPT sign-in works, because the platform's dispatcher is
+what injects the identity headers `lib/auth/owner.ts` reads.
+
+### Docker
+
+```bash
+cp .env.example .env          # CONFIRMATION_TOKEN_SECRET, GEMINI_API_KEY, ANONYMOUS_OWNER_ID
+docker compose up --build
+```
+
+The image is a two-stage build: the toolchain compiles `output: "standalone"`
+and is discarded, leaving a Node server, its dependencies and `drizzle/`. The
+database is a SQLite file on the `cabinet-data` volume, opened on the first
+query and migrated before it.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `DATABASE_PATH` | `/data/cabinet.db` in the image | Where the SQLite file lives. |
+| `MIGRATIONS_DIR` | `/app/drizzle` in the image | Migrations to apply on startup. |
+| `PORT` | `3000` | Listen port. The server binds `0.0.0.0`. |
+
+Migrations are journalled in a `_migrations` table, so a container restarting
+against an existing volume applies only what is new. Pointing a fresh container
+at a database that already has the schema but no journal fails on the first
+migration rather than guessing which ones ran; migrate that file by recording
+the applied filenames in `_migrations` yourself.
+
+**Back up the volume.** Part photos are stored in the database rather than in
+object storage, so `/data` is the whole cabinet, and it grows with every
+confirmed scan.
+
+#### Authentication is yours to supply
+
+Off the Sites platform nothing injects `oai-authenticated-user-id`, so owner
+resolution falls to `ANONYMOUS_OWNER_ID` — one cabinet shared by everyone who
+can reach the port — or refuses with a `401`. That is correct for a private,
+single-user deployment behind a firewall or a VPN, and wrong anywhere else.
+
+For real accounts, put an authenticating proxy in front (oauth2-proxy,
+Authelia, Cloudflare Access, Tailscale) and have it set
+`oai-authenticated-user-id` to a stable per-user id, leaving `ANONYMOUS_OWNER_ID`
+unset. The proxy **must strip any copy of that header it receives from the
+client**, or a visitor can send it themselves and read anyone's cabinet.
+
+### A plain Node process
+
+`npm run build && npm start` serves the same standalone output on port 3000
+with the same SQLite fallback, which is how to reproduce a container locally
+without building one. `DATABASE_PATH` defaults to `./data/cabinet.db`.
+
 ## Data model
 
 | Table | Holds |

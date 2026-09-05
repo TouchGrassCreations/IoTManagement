@@ -1,0 +1,28 @@
+services:
+  parts-cabinet:
+    build: .
+    image: parts-cabinet
+    restart: unless-stopped
+    ports:
+      - "${HOST_PORT:-3000}:3000"
+    environment:
+      # At least 16 characters. Signs the token that makes a confirmed scan
+      # idempotent, so it has to survive a restart.
+      CONFIRMATION_TOKEN_SECRET: ${CONFIRMATION_TOKEN_SECRET:?set CONFIRMATION_TOKEN_SECRET in .env}
+      # Identification calls Gemini and costs money per call. Without a key the
+      # rest of the cabinet works and identification refuses.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-}
+      # Every request lands in this one cabinet. Right for a private,
+      # single-user deployment; wrong anywhere strangers can reach the port.
+      # See "Authentication is yours to supply" in the README.
+      ANONYMOUS_OWNER_ID: ${ANONYMOUS_OWNER_ID:-}
+      IDENTIFY_RATE_LIMIT_PER_MINUTE: ${IDENTIFY_RATE_LIMIT_PER_MINUTE:-}
+      IDENTIFY_RATE_LIMIT_PER_HOUR: ${IDENTIFY_RATE_LIMIT_PER_HOUR:-}
+      IDENTIFY_RATE_LIMIT_PER_DAY: ${IDENTIFY_RATE_LIMIT_PER_DAY:-}
+    volumes:
+      # Part photos live in the database, so this volume is the whole cabinet.
+      - cabinet-data:/data
+
+volumes:
+  cabinet-data:
