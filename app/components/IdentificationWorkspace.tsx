@@ -1,11 +1,28 @@
 "use client";
 /* eslint-disable @next/next/no-img-element -- object URL previews and inline crop thumbnails are local, transient images */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { Detection, InventoryResult, ReviewItem } from "../../lib/identification/types.ts";
 import { INVENTORY_CATEGORIES } from "../../lib/identification/validation.ts";
 import { cropDetections, thumbnailFromFile } from "../../lib/identification/crop-client.ts";
+import { cameraSupport, type CameraSupport } from "../../lib/identification/camera.ts";
+import CameraCapture from "./CameraCapture.tsx";
 
 type Props = { onClose: () => void; onConfirmed: (items: InventoryResult[]) => void };
+
+/** Camera support cannot change while the page is open, so nothing subscribes. */
+const subscribeToNothing = () => () => {};
+const serverHasNoCamera = (): CameraSupport | null => null;
+
+let support: CameraSupport | undefined;
+/** Memoised: `useSyncExternalStore` re-renders forever on a fresh object. */
+function cameraOnThisDevice(): CameraSupport {
+  support ??= cameraSupport({
+    secure: window.isSecureContext,
+    hasMediaDevices: !!navigator.mediaDevices?.getUserMedia,
+    host: window.location.hostname,
+  });
+  return support;
+}
 
 function blankItem(): ReviewItem {
   return { id: crypto.randomUUID(), accepted: true, source: "manual", name: "", model: null, category: "Sensors", quantity: 1, location: "Unsorted", image: null, boundingBox: null, confidence: null, detectedName: null, detectedModel: null, visibleMarkings: [], alternatives: [], description: "Added by hand while reviewing the photo.", tags: [] };
@@ -20,7 +37,14 @@ export default function IdentificationWorkspace({ onClose, onConfirmed }: Props)
   const [error, setError] = useState("");
   const [highlighted, setHighlighted] = useState("");
   const [focusRow, setFocusRow] = useState("");
+  const [cameraFor, setCameraFor] = useState("");
   const previewRef = useRef("");
+
+  // Whether a camera can be opened is a property of the browser, not of state,
+  // and the server cannot know it. Reading it through an external store keeps
+  // the server's answer (null, so nothing renders) and the client's answer from
+  // disagreeing during hydration.
+  const camera = useSyncExternalStore(subscribeToNothing, cameraOnThisDevice, serverHasNoCamera);
 
   useEffect(() => { previewRef.current = preview; }, [preview]);
   useEffect(() => () => { if (previewRef.current) URL.revokeObjectURL(previewRef.current); }, []);
@@ -118,6 +142,11 @@ export default function IdentificationWorkspace({ onClose, onConfirmed }: Props)
 
       <div className="identify-columns">
         <div className="upload-pane">
+          {cameraFor === "photo" ? <CameraCapture
+            label="Identify components"
+            onCancel={() => setCameraFor("")}
+            onCapture={(captured) => { setCameraFor(""); choose(captured); }}
+          /> : <>
           <label className="photo-drop">
             <input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={(event) => choose(event.target.files?.[0] || null)} />
             {preview ? <span className="photo-frame">
@@ -128,6 +157,9 @@ export default function IdentificationWorkspace({ onClose, onConfirmed }: Props)
               <span>Place one or several parts on a clear, well-lit background.</span>
             </>}
           </label>
+          {camera?.available && <button className="camera-button" onClick={() => setCameraFor("photo")} disabled={busy !== ""}>Open camera</button>}
+          {camera && !camera.available && <p className="camera-unavailable">{camera.reason}</p>}
+          </>}
           <button className="submit" disabled={!file || busy !== ""} onClick={analyze}>{busy === "analyzing" ? "Analyzing…" : detected.length ? "Re-analyze photo" : "Identify components"}</button>
           <button className="manual-button" onClick={addManual} disabled={busy !== ""}>＋ Add a part by hand instead</button>
         </div>
@@ -144,11 +176,18 @@ export default function IdentificationWorkspace({ onClose, onConfirmed }: Props)
               {item.confidence !== null && <span className={item.confidence < .7 ? "low-confidence" : ""}>{Math.round(item.confidence * 100)}% likely</span>}
             </div>
             <div className="detection-preview">
-              {item.image ? <img src={item.image} alt={item.name ? `Crop of ${item.name}` : "Crop of this component"} /> : <span className="preview-placeholder">No photo</span>}
-              <label className="photo-swap">
-                <input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={(event) => void attachPhoto(item.id, event.target.files?.[0] || null)} />
-                {item.image ? "Replace photo" : "Add a photo"}
-              </label>
+              {cameraFor === item.id ? <CameraCapture
+                label={item.name || "This component"}
+                onCancel={() => setCameraFor("")}
+                onCapture={(captured) => { setCameraFor(""); void attachPhoto(item.id, captured); }}
+              /> : <>
+                {item.image ? <img src={item.image} alt={item.name ? `Crop of ${item.name}` : "Crop of this component"} /> : <span className="preview-placeholder">No photo</span>}
+                <label className="photo-swap">
+                  <input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={(event) => void attachPhoto(item.id, event.target.files?.[0] || null)} />
+                  {item.image ? "Replace photo" : "Add a photo"}
+                </label>
+                {camera?.available && <button type="button" className="photo-swap" onClick={() => setCameraFor(item.id)}>Camera</button>}
+              </>}
             </div>
             <label>Name<input ref={(element) => { if (element && focusRow === item.id) { element.focus(); setFocusRow(""); } }} value={item.name} placeholder="e.g. BMP280 pressure sensor" onChange={(event) => patch(item.id, { name: event.target.value })} /></label>
             <div className="form-row">

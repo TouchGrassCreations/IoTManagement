@@ -75,6 +75,17 @@ itself taken from that photo.
 
 - **Identify with camera** is the primary action in the header, hero, toolbar
   and empty state.
+- **Open camera** runs a viewfinder in the page itself, with a shutter and a
+  switch between front and back lenses. The frame is captured to a JPEG at most
+  1920 px on its long edge — enough to read chip markings, small enough to
+  upload — and drops straight into the review list. Choosing an existing photo
+  still works alongside it, and the camera is released the moment the shot is
+  taken.
+- Browsers only expose a camera on a **secure origin**. Over HTTPS or on
+  `localhost` the button appears; anywhere else it is replaced by a line
+  explaining that HTTPS is needed, and choosing a photo still works. See
+  [Docker](#docker) — a container reached at a bare `http://192.168.x.x` has no
+  camera until it is served over TLS.
 - Gemini returns likely names, models, counts, confidence, visible markings and
   alternatives, each with a bounding box drawn over the photo.
 - Every detection is cropped in the browser and shown beside its row, so the
@@ -204,6 +215,23 @@ the applied filenames in `_migrations` yourself.
 **Back up the volume.** Part photos are stored in the database rather than in
 object storage, so `/data` is the whole cabinet, and it grows with every
 confirmed scan.
+
+**Serve it over TLS if you want the in-page camera.** Browsers expose
+`getUserMedia` only on a secure origin, so a cabinet reached at
+`http://192.168.1.10:3000` falls back to choosing a photo. A reverse proxy
+terminating TLS — which you likely want anyway for the authentication below —
+restores the viewfinder.
+
+#### Secrets
+
+`GEMINI_API_KEY` and `CONFIRMATION_TOKEN_SECRET` reach the container through
+the environment and are never baked into the image, so the image stays safe to
+rebuild and share. Keep the values in a `.env` file beside `docker-compose.yml`
+— already ignored by git — owned by the deploying user and `chmod 600`. Use a
+different Gemini key for development than for the deployment, so revoking one
+does not take out the other, and restrict each key to the Generative Language
+API in Google AI Studio. The key never reaches the browser: identification runs
+in a route handler, so only the server ever holds it.
 
 #### Authentication is yours to supply
 
