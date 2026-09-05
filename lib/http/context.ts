@@ -4,6 +4,7 @@ import { resolveOwnerId } from "../auth/owner.ts";
 export type RouteEnv = {
   DB: D1Like;
   ANONYMOUS_OWNER_ID?: string;
+  TRUSTED_PROXY_SECRET?: string;
   CONFIRMATION_TOKEN_SECRET?: string;
   GEMINI_API_KEY?: string;
   GEMINI_MODEL?: string;

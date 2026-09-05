@@ -1,21 +1,61 @@
 services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    # The only service with published ports. Everything else talks over the
+    # internal network, so nothing can reach the app without passing sign-in.
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      CABINET_DOMAIN: ${CABINET_DOMAIN:?set CABINET_DOMAIN to the hostname the cabinet answers on}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL for the Let'\''s Encrypt account}
+      TRUSTED_PROXY_SECRET: ${TRUSTED_PROXY_SECRET:?set TRUSTED_PROXY_SECRET, see README}
+    depends_on:
+      - oauth2-proxy
+      - parts-cabinet
+
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.13.0
+    restart: unless-stopped
+    command:
+      - --http-address=0.0.0.0:4180
+      - --reverse-proxy=true
+      - --provider=${OAUTH_PROVIDER:-google}
+      - --email-domain=${OAUTH_EMAIL_DOMAIN:-*}
+      - --upstream=static://202
+      - --skip-provider-button=true
+      # The identity Caddy copies onto the request comes from these two.
+      - --set-xauthrequest=true
+    environment:
+      OAUTH2_PROXY_CLIENT_ID: ${OAUTH_CLIENT_ID:?set OAUTH_CLIENT_ID}
+      OAUTH2_PROXY_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET:?set OAUTH_CLIENT_SECRET}
+      # 32 bytes, base64. Rotating it signs everyone out; losing it is harmless.
+      OAUTH2_PROXY_COOKIE_SECRET: ${OAUTH_COOKIE_SECRET:?set OAUTH_COOKIE_SECRET}
+      OAUTH2_PROXY_REDIRECT_URL: https://${CABINET_DOMAIN}/oauth2/callback
+      OAUTH2_PROXY_COOKIE_SECURE: "true"
+
   parts-cabinet:
     build: .
     image: parts-cabinet
     restart: unless-stopped
-    ports:
-      - "${HOST_PORT:-3000}:3000"
+    # Deliberately no `ports`. Publishing 3000 would put the app on the LAN
+    # beside the proxy rather than behind it.
+    expose:
+      - "3000"
     environment:
-      # At least 16 characters. Signs the token that makes a confirmed scan
-      # idempotent, so it has to survive a restart.
       CONFIRMATION_TOKEN_SECRET: ${CONFIRMATION_TOKEN_SECRET:?set CONFIRMATION_TOKEN_SECRET in .env}
-      # Identification calls Gemini and costs money per call. Without a key the
-      # rest of the cabinet works and identification refuses.
+      # Identity headers count for nothing unless the request also carries
+      # this, which only Caddy adds. See "Who owns what" in the README.
+      TRUSTED_PROXY_SECRET: ${TRUSTED_PROXY_SECRET:?set TRUSTED_PROXY_SECRET, see README}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-}
-      # Every request lands in this one cabinet. Right for a private,
-      # single-user deployment; wrong anywhere strangers can reach the port.
-      # See "Authentication is yours to supply" in the README.
+      # Leave unset behind the proxy: every visitor has a real identity, and a
+      # value here would put them all in one shared cabinet instead.
       ANONYMOUS_OWNER_ID: ${ANONYMOUS_OWNER_ID:-}
       IDENTIFY_RATE_LIMIT_PER_MINUTE: ${IDENTIFY_RATE_LIMIT_PER_MINUTE:-}
       IDENTIFY_RATE_LIMIT_PER_HOUR: ${IDENTIFY_RATE_LIMIT_PER_HOUR:-}
@@ -26,3 +66,5 @@ services:
 
 volumes:
   cabinet-data:
+  caddy-data:
+  caddy-config:

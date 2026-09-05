@@ -1,0 +1,56 @@
+# TLS terminates here, and so does identity: everything behind this file trusts
+# what it says, so it has to be the only thing that can say it.
+{
+	email {$ACME_EMAIL}
+}
+
+{$CABINET_DOMAIN} {
+	encode zstd gzip
+
+	# First, before any handler can read them: drop the identity headers a
+	# client sent for itself. The app reads these to decide whose cabinet it is
+	# showing, so a visitor who could set them could read anybody's. They are
+	# deleted unconditionally and re-set below only from a verified session.
+	request_header -Oai-Authenticated-User-Id
+	request_header -Oai-Authenticated-User-Email
+	request_header -Oai-Authenticated-User-Full-Name
+	request_header -Oai-Authenticated-User-Full-Name-Encoding
+	request_header -X-Cabinet-Proxy-Secret
+
+	# The sign-in dance itself, which by definition cannot require being signed in.
+	handle /oauth2/* {
+		reverse_proxy {$OAUTH_UPSTREAM:oauth2-proxy:4180}
+	}
+
+	handle {
+		forward_auth {$OAUTH_UPSTREAM:oauth2-proxy:4180} {
+			uri /oauth2/auth
+			# Only from the auth response, and only after the strip above.
+			copy_headers X-Auth-Request-User>Oai-Authenticated-User-Id X-Auth-Request-Email>Oai-Authenticated-User-Email
+
+			@unauthorized status 401
+			handle_response @unauthorized {
+				# A page gets sent to sign in. A fetch gets told, because
+				# following a redirect to an HTML sign-in page and parsing it
+				# as JSON is how an expired session turns into "something went
+				# wrong" instead of "sign in again".
+				# `handle` blocks rather than a matcher on `respond`: Caddy runs
+				# `redir` before `respond` in its default directive order, so a
+				# bare matcher here would be overtaken by the redirect below.
+				handle /api/* {
+					respond "Your session has expired. Reload the page to sign in again." 401
+				}
+				handle {
+					redir * /oauth2/start?rd={http.request.uri}
+				}
+			}
+		}
+
+		reverse_proxy {$CABINET_UPSTREAM:parts-cabinet:3000} {
+			# Proves to the app that this request came through here. Without it
+			# the app refuses the identity headers, so a request that reaches
+			# the container some other way cannot claim to be anyone.
+			header_up X-Cabinet-Proxy-Secret {$TRUSTED_PROXY_SECRET}
+		}
+	}
+}
