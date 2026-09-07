@@ -13,7 +13,7 @@ services:
       - caddy-config:/config
     environment:
       CABINET_DOMAIN: ${CABINET_DOMAIN:?set CABINET_DOMAIN to the hostname the cabinet answers on}
-      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL for the Let'\''s Encrypt account}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL to the address for the ACME account}
       TRUSTED_PROXY_SECRET: ${TRUSTED_PROXY_SECRET:?set TRUSTED_PROXY_SECRET, see README}
     depends_on:
       - oauth2-proxy
