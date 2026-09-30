@@ -210,7 +210,7 @@ using `https://<CABINET_DOMAIN>/oauth2/callback` as the redirect URI.
 | `ACME_EMAIL` | Let's Encrypt account address. |
 | `TRUSTED_PROXY_SECRET` | Shared between Caddy and the app. `openssl rand -hex 32`. |
 | `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET` | From your identity provider. |
-| `OAUTH_COOKIE_SECRET` | `openssl rand -base64 32`. Rotating it signs everyone out. |
+| `OAUTH_COOKIE_SECRET` | `openssl rand -base64 32 \| tr -- '+/' '-_'`. Rotating it signs everyone out. |
 | `OAUTH_EMAIL_DOMAIN` | Who may sign in. `*` admits anyone the provider authenticates. |
 
 Every visitor's scans spend **your** Gemini budget, so `OAUTH_EMAIL_DOMAIN=*`
@@ -219,12 +219,23 @@ cap the damage but do not stop it; restrict the domain, or keep the
 `IDENTIFY_RATE_LIMIT_*` values low.
 
 To run the cabinet alone, without TLS or sign-in — a private machine, or a
-first look — start just that service and publish its port:
+first look — build the image and run it with plain `docker`:
 
 ```bash
-docker compose run --rm --service-ports \
-  -e ANONYMOUS_OWNER_ID=me -e TRUSTED_PROXY_SECRET= parts-cabinet
+docker build -t parts-cabinet .
+docker run -d --name cabinet -p 3000:3000 --restart unless-stopped \
+  -e CONFIRMATION_TOKEN_SECRET="$(openssl rand -hex 32)" \
+  -e GEMINI_API_KEY=<your key> \
+  -e ANONYMOUS_OWNER_ID=me \
+  -v cabinet-data:/data \
+  parts-cabinet
 ```
+
+Then open `http://localhost:3000`. Not `docker compose run`: Compose
+interpolates the whole file before starting anything, so it refuses to run even
+one service until the proxy stack's variables are set too. And not
+`--env-file .env`: the example's `DATABASE_PATH=./data/cabinet.db` would move
+the database off the volume into a directory the container cannot write.
 
 The image is a two-stage build: the toolchain compiles `output: "standalone"`
 and is discarded, leaving a Node server, its dependencies and `drizzle/`. The
