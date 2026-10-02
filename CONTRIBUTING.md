@@ -1,45 +1,43 @@
 # Contributing Guide
 
-Thank you for contributing to the project! Please follow these guidelines to get started and submit your work.
+Thank you for contributing! Please follow these guidelines to get started and submit your work.
 
 ## Local Development Setup
 
-1. **Prerequisites**: Ensure you have Node.js (v18+ recommended) and `npm` installed.
+1. **Prerequisites**: Node.js `>=22.13.0` (see `engines` in `package.json`).
 2. **Clone the repository**:
    ```bash
-   git clone <repo-url>
-   cd <repo-folder>
+   git clone https://github.com/TouchGrassCreations/IoTManagement.git
+   cd IoTManagement
    ```
-3. **Install dependencies**:
+3. **Install and configure**:
    ```bash
    npm install
+   cp .env.example .env.local   # fill in GEMINI_API_KEY and CONFIRMATION_TOKEN_SECRET
    ```
-4. **Run development server**:
+   See the Configuration table in the README for every variable.
+4. **Run the development server**:
    ```bash
    npm run dev
    ```
 
 ## Running Tests
 
-Before submitting changes, ensure all tests pass:
+CI runs lint, typecheck, unit tests and the build on every pull request. Run the same locally:
 
-- **Run all tests**:
-  ```bash
-  npm test
-  ```
-- **Type checking and linting**:
-  ```bash
-  npm run typecheck
-  npm run lint
-  ```
+```bash
+npm run lint
+npm run typecheck
+npm run test:unit   # unit and persistence tests
+npm test            # builds, then server-renders the app and checks the HTML
+```
 
 ## Pull Request Guidelines
 
-- **Branch naming**: Use descriptive branch names such as `feature/add-part-scanner` or `fix/camera-detection`.
-- **Commit messages**: Use clear, concise commit messages following standard conventions (e.g., `feat: ...`, `fix: ...`, `docs: ...`).
-- **PR scope**: Keep pull requests focused on a single concern or feature.
+- **Commit messages**: clear and concise, e.g. `feat: ...`, `fix: ...`, `docs: ...`.
+- **PR scope**: keep each pull request to a single concern or feature.
 - **Code style & quality**:
-  - Adhere to the existing TypeScript conventions and patterns across the codebase.
-  - Ensure all type checks and linters pass without warnings or errors.
-  - Add or update tests corresponding to your changes where applicable.
-- **PR Description**: Include a clear description of the problem solved or feature added, along with testing steps or screenshots if relevant.
+  - Follow the existing TypeScript conventions and patterns in the codebase.
+  - Make sure lint and typecheck pass without warnings or errors.
+  - Add or update tests for your changes where applicable.
+- **PR description**: say what problem it solves, and include testing steps or screenshots if relevant.
