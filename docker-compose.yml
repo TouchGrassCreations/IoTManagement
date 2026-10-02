@@ -34,7 +34,8 @@ services:
     environment:
       OAUTH2_PROXY_CLIENT_ID: ${OAUTH_CLIENT_ID:?set OAUTH_CLIENT_ID}
       OAUTH2_PROXY_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET:?set OAUTH_CLIENT_SECRET}
-      # 32 bytes, base64. Rotating it signs everyone out; losing it is harmless.
+      # 32 bytes, URL-safe base64 (see .env.example). Rotating it signs everyone
+      # out; losing it is harmless.
       OAUTH2_PROXY_COOKIE_SECRET: ${OAUTH_COOKIE_SECRET:?set OAUTH_COOKIE_SECRET}
       OAUTH2_PROXY_REDIRECT_URL: https://${CABINET_DOMAIN}/oauth2/callback
       OAUTH2_PROXY_COOKIE_SECURE: "true"
