@@ -22,6 +22,31 @@ cp .env.example .env.local   # then fill in the values below
 npm run dev
 ```
 
+## Setup and Configuration
+
+**Prerequisites**
+
+- Node.js `>=22.13.0`
+- Docker & Docker Compose (optional, for containerized deployment)
+
+**Environment variables**
+
+| Binding | Required | Purpose |
+| --- | --- | --- |
+| `GEMINI_API_KEY` | yes | Key from Google AI Studio; used for identification. |
+| `GEMINI_MODEL` | no | Defaults to `gemini-3.1-flash-lite`. |
+| `CONFIRMATION_TOKEN_SECRET` | yes | At least 16 characters. Signs the token that makes a confirmed scan idempotent. |
+| `ANONYMOUS_OWNER_ID` | no | Owner used when no signed-in identity is present. See below. |
+| `IDENTIFY_RATE_LIMIT_PER_MINUTE` | no | Identification budget per owner. Defaults to 10. |
+| `IDENTIFY_RATE_LIMIT_PER_HOUR` | no | Defaults to 60. |
+| `IDENTIFY_RATE_LIMIT_PER_DAY` | no | Defaults to 200. |
+
+**Running with Docker**
+
+```bash
+docker compose up --build
+```
+
 ### Configuration
 
 | Binding | Required | Purpose |
